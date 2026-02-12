@@ -3,7 +3,6 @@ import json
 import math
 import os
 import platform
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
