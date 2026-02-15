@@ -6,9 +6,8 @@ use tokio::{
     fs,
     process::{Child, Command},
 };
-use uuid::Uuid;
 
-use crate::launcher::{self, downloader::ManifestVersion, instances::InstalledVersion};
+use crate::launcher::{self, downloader::ManifestVersion};
 
 pub const METADATA_FILENAME: &'static str = "nelius_metadata.lock";
 
@@ -21,9 +20,9 @@ pub struct InstallationMetadata {
     pub classpath_relative: Vec<String>,
 }
 
-async fn launch(installed_version: &InstalledVersion) -> anyhow::Result<Child, anyhow::Error> {
+async fn launch(installed_version: &String) -> anyhow::Result<Child, anyhow::Error> {
     let game_dir =
-        launcher::instances::get_project_dirs().data_local_dir().join("installations").join(&installed_version.id);
+        launcher::instances::get_project_dirs().data_local_dir().join("installations").join(&installed_version);
 
     fs::try_exists(&game_dir).await.context("the game directory was not found")?;
 
@@ -44,6 +43,7 @@ async fn launch(installed_version: &InstalledVersion) -> anyhow::Result<Child, a
     let mut cmd = Command::new("java");
 
     cmd.current_dir(&game_dir)
+        .arg(format!("-Djava.library.path={}", game_dir.join("natives").display()))
         .arg("-Xmx4G")
         .arg("-cp")
         .arg(classpath)
@@ -71,26 +71,28 @@ async fn launch(installed_version: &InstalledVersion) -> anyhow::Result<Child, a
 
 pub struct PlayResult {
     pub child: Child,
-    pub new_installation: Option<InstalledVersion>,
+    pub new_installation: Option<String>,
 }
 
 pub async fn play(selected_version: &ManifestVersion) -> anyhow::Result<PlayResult, anyhow::Error> {
     let installed =
-        launcher::instances::get_installed().await?.iter().find(|v| v.version == selected_version.version_id).cloned();
+        launcher::instances::get_installed().await?.iter().find(|v| *v == &selected_version.version_id).cloned();
 
     if let Some(installed) = installed {
         Ok(PlayResult { child: launch(&installed).await?, new_installation: None })
     } else {
-        let installation_id = Uuid::new_v4().to_string();
-        let installation_dir =
-            launcher::instances::get_project_dirs().data_local_dir().join("installations").join(&installation_id);
+        let installation_dir = launcher::instances::get_project_dirs()
+            .data_local_dir()
+            .join("installations")
+            .join(&selected_version.version_id);
 
         fs::create_dir_all(&installation_dir).await?;
         let version_data = launcher::downloader::get_version_data(selected_version.version_id.clone()).await?;
         launcher::downloader::install_minecraft(&version_data, &installation_dir).await?;
 
-        let new_installed_version =
-            InstalledVersion { id: installation_id, version: selected_version.version_id.clone() };
-        Ok(PlayResult { child: launch(&new_installed_version).await?, new_installation: Some(new_installed_version) })
+        Ok(PlayResult {
+            child: launch(&selected_version.version_id).await?,
+            new_installation: Some(selected_version.version_id.clone()),
+        })
     }
 }
