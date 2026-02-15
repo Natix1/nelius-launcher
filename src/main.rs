@@ -11,10 +11,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 const MAX_LOGS_LINES: usize = 10_000;
 
-use crate::launcher::{
-    downloader::{ManifestVersion, VersionType},
-    instances::InstalledVersion,
-};
+use crate::launcher::downloader::{ManifestVersion, VersionType};
 
 mod launcher;
 
@@ -22,7 +19,7 @@ struct AppState {
     selected_version: Option<ManifestVersion>,
     all_versions: Result<Vec<ManifestVersion>, String>,
     filtered_versions: Vec<ManifestVersion>,
-    installed_versions: Vec<InstalledVersion>,
+    installed_versions: Vec<String>,
     logs: Vec<String>,
 
     playing: bool,
@@ -50,14 +47,13 @@ impl Default for AppState {
 enum Message {
     VersionChanged(ManifestVersion),
     MinecraftVersionsLoaded(Result<Vec<ManifestVersion>, String>),
-    InstalledVersionsLoaded(Result<Vec<InstalledVersion>, String>),
+    InstalledVersionsLoaded(Result<Vec<String>, String>),
     ShowReleasesUpdated(bool),
     ShowSnapshotsUpdated(bool),
     StartGameRequest,
-    MinecraftLaunched(Result<Option<InstalledVersion>, String>),
+    MinecraftLaunched(Result<Option<String>, String>),
     LogLineReceived(String),
     GameClosed,
-    NoOp,
 }
 
 impl AppState {
@@ -93,15 +89,44 @@ impl AppState {
         match launcher::boot::play(&version).await {
             Ok(mut play_result) => {
                 let _ = output.send(Message::MinecraftLaunched(Ok(play_result.new_installation))).await;
+                let stdout = play_result.child.stdout.take().expect("could not take stdout");
+                let stderr = play_result.child.stderr.take().expect("could not take stderr");
 
-                if let Some(stdout) = play_result.child.stdout.take() {
-                    let mut reader = BufReader::new(stdout).lines();
-                    while let Ok(Some(line)) = reader.next_line().await {
-                        let _ = output.send(Message::LogLineReceived(line)).await;
+                let mut stdout = BufReader::new(stdout).lines();
+                let mut stdin = BufReader::new(stderr).lines();
+
+                loop {
+                    tokio::select! {
+                        result = stdout.next_line() => {
+                            match result {
+                                Ok(Some(line)) => {
+                                    let _ = output.send(Message::LogLineReceived(line)).await;
+                                },
+                                Ok(None) => break,
+                                Err(e) => {
+                                    eprintln!("Failed reading stdout: {}", e);
+                                    break;
+                                }
+                            };
+                        }
+
+                        result = stdin.next_line() => {
+                            match result {
+                                Ok(Some(line)) => {
+                                    let _ = output.send(Message::LogLineReceived(line)).await;
+                                },
+                                Ok(None) => break,
+                                Err(e) => {
+                                    eprintln!("Failed reading stderr: {}", e);
+                                }
+                            };
+                        }
+
+                        _ = play_result.child.wait() => {
+                            break;
+                        }
                     }
                 }
-
-                let _ = play_result.child.wait().await;
                 let _ = output.send(Message::GameClosed).await;
             }
             Err(e) => {
@@ -169,14 +194,7 @@ impl AppState {
             Message::MinecraftLaunched(installed_version) => match installed_version {
                 Ok(Some(version)) => {
                     self.installed_versions.push(version);
-                    let to_dump = self.installed_versions.clone();
-
-                    Task::perform(
-                        async move {
-                            let _ = launcher::instances::save_installed(to_dump).await;
-                        },
-                        |_| Message::NoOp,
-                    )
+                    Task::none()
                 }
                 _ => Task::none(),
             },
@@ -185,13 +203,13 @@ impl AppState {
                 Task::none()
             }
             Message::LogLineReceived(line) => {
+                println!("Received log line: {}", line);
                 if self.logs.len() > MAX_LOGS_LINES {
                     self.logs.clear();
                 }
                 self.logs.push(line);
                 Task::none()
             }
-            Message::NoOp => Task::none(),
         }
     }
 
@@ -200,8 +218,8 @@ impl AppState {
             Ok(v) if v.is_empty() => text("Loading version information, hang tight!").color(color!(255, 255, 0)),
             Ok(_) => {
                 if let Some(version) = &self.selected_version {
-                    let installed_version = &self.installed_versions.iter().find(|v| v.version == version.version_id);
-                    if installed_version.is_some() {
+                    let is_installed = self.installed_versions.iter().any(|v| v == &version.version_id);
+                    if is_installed {
                         text("This version is installed on disk! Will launch immediately.").color(color!(0, 255, 0))
                     } else {
                         text("This version is not installed on disk. It will be downloaded upon pressing play.")

@@ -2,7 +2,8 @@ use anyhow::{Context, Ok};
 use futures::StreamExt;
 use serde_json::Value;
 use std::{env, fmt, path::PathBuf};
-use tokio::{fs, io::AsyncWriteExt, sync::OnceCell};
+use tokio::{fs, io::AsyncWriteExt, sync::OnceCell, task::JoinSet};
+use zip::ZipArchive;
 
 use crate::launcher::{
     boot::{InstallationMetadata, METADATA_FILENAME},
@@ -55,6 +56,7 @@ pub struct Library {
     pub specific_os: Option<MinecraftCompatibleOS>,
     pub download_path: String,
     pub download_url: String,
+    pub is_native: bool,
 }
 
 impl Library {
@@ -66,6 +68,76 @@ impl Library {
 
             _ => true,
         }
+    }
+}
+
+impl Library {
+    fn from_json(library: &Value) -> Result<Option<Library>, anyhow::Error> {
+        let mut system: Option<MinecraftCompatibleOS> = None;
+        let raw_rules = match library["rules"].as_array() {
+            Some(v) => v,
+            None => &vec![],
+        };
+        let raw_classifiers = library["downloads"]["classifiers"].as_object();
+        let download_url: String;
+        let download_path: String;
+        let mut is_native = false;
+
+        if let Some(classifiers) = raw_classifiers {
+            let native_key = match std::env::consts::OS {
+                "windows" => "natives-windows",
+                "macos" => "natives-osx",
+                "linux" => "natives-linux",
+                _ => {
+                    anyhow::bail!("we're on an unsupported os");
+                }
+            };
+
+            if let Some(native) = classifiers.get(native_key) {
+                download_url =
+                    native["url"].as_str().context("bad json: download url not listed in classifier")?.to_string();
+                download_path =
+                    native["path"].as_str().context("bad json: download path not listed in classifier")?.to_string();
+
+                is_native = true;
+            } else {
+                return Ok(None);
+            }
+        } else {
+            download_url = library["downloads"]["artifact"]["url"]
+                .as_str()
+                .context("couldn't find download url in both classifier and artifact")?
+                .to_string();
+
+            download_path = library["downloads"]["artifact"]["path"]
+                .as_str()
+                .context("couldn't find download path in both classifier and artifact")?
+                .to_string();
+        }
+
+        for rule in raw_rules {
+            let raw_system = rule["os"]["name"].as_str().unwrap_or("unknown");
+            let action = rule["action"].as_str().context("couldn't find action for rule")?;
+            if action != "allow" {
+                continue;
+            }
+
+            system = match raw_system {
+                "linux" => Some(MinecraftCompatibleOS::Linux),
+                "osx" => Some(MinecraftCompatibleOS::OSX),
+                "windows" => Some(MinecraftCompatibleOS::Windows),
+
+                _ => None,
+            };
+        }
+
+        Ok(Some(Library {
+            library_name: library["name"].as_str().context("bad json: couldn't parse library name")?.to_string(),
+            specific_os: system,
+            download_path: download_path,
+            download_url: download_url,
+            is_native: is_native,
+        }))
     }
 }
 
@@ -158,41 +230,11 @@ pub async fn get_version_data(version_id: String) -> anyhow::Result<VersionData>
     let raw_libraries = response["libraries"].as_array().context("bad json: couldn't parse libraries into json")?;
     let mut libraries = Vec::with_capacity(raw_libraries.len());
 
-    for library in raw_libraries {
-        let mut system: Option<MinecraftCompatibleOS> = None;
-        let raw_rules = match library["rules"].as_array() {
-            Some(v) => v,
-            None => &vec![],
-        };
-
-        for rule in raw_rules {
-            let raw_system = rule["os"]["name"].as_str().unwrap_or("unknown");
-            system = match raw_system {
-                "linux" => Some(MinecraftCompatibleOS::Linux),
-                "osx" => Some(MinecraftCompatibleOS::OSX),
-                "windows" => Some(MinecraftCompatibleOS::Windows),
-
-                _ => None,
-            };
-
-            if system.is_some() {
-                // we dont need to keep iterating via rules; we got what we needed
-                break;
-            }
+    for raw_library in raw_libraries {
+        let library = Library::from_json(raw_library)?;
+        if let Some(library) = library {
+            libraries.push(library);
         }
-
-        libraries.push(Library {
-            library_name: library["name"].as_str().context("bad json: couldn't parse library name")?.to_string(),
-            specific_os: system,
-            download_path: library["downloads"]["artifact"]["path"]
-                .as_str()
-                .context("bad json: couldn't parse download path")?
-                .to_string(),
-            download_url: library["downloads"]["artifact"]["url"]
-                .as_str()
-                .context("bad json: couldn't parse download url")?
-                .to_string(),
-        });
     }
 
     Ok(VersionData {
@@ -217,22 +259,57 @@ pub async fn get_version_data(version_id: String) -> anyhow::Result<VersionData>
     })
 }
 
+fn extract_natives(jar_path: &PathBuf, natives_dir: &PathBuf) -> anyhow::Result<()> {
+    let file = std::fs::File::open(&jar_path)?;
+    let mut archive = ZipArchive::new(file)?;
+
+    if !natives_dir.exists() {
+        std::fs::create_dir_all(&natives_dir)?;
+    }
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let name = file.name();
+        if name.ends_with(".dll") || name.ends_with(".so") || name.ends_with(".dylib") {
+            if let Some(filename) = file.enclosed_name().and_then(|p| p.file_name().map(|f| f.to_owned())) {
+                let out_path = natives_dir.join(filename);
+
+                let mut out_file = std::fs::File::create(&out_path)?;
+                std::io::copy(&mut file, &mut out_file)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+struct ToDownload {
+    download_uri: String,
+    download_path: PathBuf,
+    is_native: bool,
+}
+
 pub async fn install_minecraft(version: &VersionData, directory: &PathBuf) -> anyhow::Result<(), anyhow::Error> {
     fs::create_dir_all(directory.as_path()).await?;
 
     let mut classpath_relative: Vec<String> = Vec::with_capacity(256);
-    let client_jar_directory = directory.join("client.jar");
+
+    let client_jar_directory =
+        directory.join("versions").join(&version.version_id).join(format!("{}.jar", &version.version_id));
     let libraries_directory = directory.join("libraries");
     let assets_directory = directory.join("assets");
 
     let objects_directory = assets_directory.join("objects");
     let indexes_directory = assets_directory.join("indexes");
+    let natives_directory = directory.join("natives");
     let mut asset_index_path = indexes_directory.join(&version.asset_index_id);
     asset_index_path.set_extension("json");
 
     fs::create_dir_all(&libraries_directory).await?;
     fs::create_dir_all(&objects_directory).await?;
     fs::create_dir_all(&indexes_directory).await?;
+    fs::create_dir_all(client_jar_directory.parent().context("failed constructing client.jar directory")?).await?;
+    fs::create_dir_all(&natives_directory).await?;
 
     let libraries = version.get_os_required_libraries();
     let asset_index = get_reqwest_client().get(&version.asset_index_download_url).send().await?.bytes().await?.to_vec();
@@ -240,13 +317,24 @@ pub async fn install_minecraft(version: &VersionData, directory: &PathBuf) -> an
     let mut file = fs::File::create(asset_index_path).await?;
     file.write_all(&asset_index).await?;
 
-    let mut files_to_download: Vec<(String, PathBuf)> = Vec::with_capacity(1024);
-    files_to_download.push((version.client_jar_download_url.clone(), client_jar_directory.clone()));
+    let mut files_to_download: Vec<ToDownload> = Vec::with_capacity(1024);
+    files_to_download.push(ToDownload {
+        download_uri: version.client_jar_download_url.clone(),
+        download_path: client_jar_directory.clone(),
+        is_native: false,
+    });
 
     for library in libraries {
         let full_download_path = libraries_directory.join(&library.download_path);
-        files_to_download.push((library.download_url.clone(), full_download_path.clone()));
-        classpath_relative.push(full_download_path.clone().to_string_lossy().to_owned().to_string());
+        files_to_download.push(ToDownload {
+            download_uri: library.download_url.clone(),
+            download_path: full_download_path.clone(),
+            is_native: library.is_native,
+        });
+
+        if !library.is_native {
+            classpath_relative.push(full_download_path.clone().to_string_lossy().to_owned().to_string());
+        }
     }
 
     let decoded_asset_index: Value = serde_json::from_slice(&asset_index)?;
@@ -257,18 +345,27 @@ pub async fn install_minecraft(version: &VersionData, directory: &PathBuf) -> an
         let uri = format!("{}/{}/{}", RESOURCES_BASE_URL, hash_first_two, hash);
         let path = objects_directory.join(hash_first_two).join(hash);
 
-        files_to_download.push((uri, path));
+        files_to_download.push(ToDownload { download_uri: uri, download_path: path, is_native: false });
     }
 
     let results = futures::stream::iter(files_to_download)
-        .map(|(url, path)| {
+        .map(|task| {
             let client = get_reqwest_client();
+            let natives_directory = natives_directory.clone();
+
             async move {
-                let parent_path = path.parent().context("failed getting parent path")?;
+                let parent_path = task.download_path.parent().context("failed getting parent path")?;
                 fs::create_dir_all(parent_path).await?;
-                let response = client.get(url).send().await?;
+                let response = client.get(task.download_uri).send().await?;
                 let bytes = response.bytes().await?;
-                fs::write(path, bytes).await?;
+                fs::write(&task.download_path, bytes).await?;
+
+                if task.is_native {
+                    tokio::task::spawn_blocking(move || extract_natives(&task.download_path, &natives_directory))
+                        .await?
+                        .context("failed extracting natives")?;
+                }
+
                 Ok(())
             }
         })
