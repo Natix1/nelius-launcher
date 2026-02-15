@@ -11,15 +11,12 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 const MAX_LOGS_LINES: usize = 10_000;
 
-use crate::{
+use crate::launcher::{
     downloader::{ManifestVersion, VersionType},
-    installed_versions::InstalledVersion,
+    instances::InstalledVersion,
 };
 
-mod downloader;
-mod installed_versions;
 mod launcher;
-mod reqwest_global_client;
 
 struct AppState {
     selected_version: Option<ManifestVersion>,
@@ -67,7 +64,8 @@ impl AppState {
     fn init() -> (Self, Task<Message>) {
         let fetch_versions = Task::perform(
             async move {
-                let versions = downloader::get_versions().await.map(|v| v.to_vec()).map_err(|e| e.to_string())?;
+                let versions =
+                    launcher::downloader::get_versions().await.map(|v| v.to_vec()).map_err(|e| e.to_string())?;
 
                 Ok(versions)
             },
@@ -76,7 +74,7 @@ impl AppState {
 
         let load_installed_versions = Task::perform(
             async {
-                let versions = installed_versions::get_installed_versions_from_disk()
+                let versions = launcher::instances::get_installed()
                     .await
                     .map_err(|e| format!("failed getting versions from disk: {}", e));
 
@@ -92,7 +90,7 @@ impl AppState {
         version: ManifestVersion,
         mut output: iced::futures::channel::mpsc::Sender<Message>,
     ) {
-        match launcher::play(&version).await {
+        match launcher::boot::play(&version).await {
             Ok(mut play_result) => {
                 let _ = output.send(Message::MinecraftLaunched(Ok(play_result.new_installation))).await;
 
@@ -107,7 +105,9 @@ impl AppState {
                 let _ = output.send(Message::GameClosed).await;
             }
             Err(e) => {
+                eprintln!("Error while launching / downloading minecraft: {}", e);
                 let _ = output.send(Message::MinecraftLaunched(Err(e.to_string()))).await;
+                let _ = output.send(Message::LogLineReceived(format!("Failed launching minecraft: {}", e))).await;
             }
         }
     }
@@ -173,7 +173,7 @@ impl AppState {
 
                     Task::perform(
                         async move {
-                            let _ = installed_versions::dump_installed_versions(to_dump).await;
+                            let _ = launcher::instances::save_installed(to_dump).await;
                         },
                         |_| Message::NoOp,
                     )

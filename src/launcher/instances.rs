@@ -14,7 +14,7 @@ pub fn get_project_dirs() -> ProjectDirs {
     return ProjectDirs::from("dev", "natix", "nelius-launcher").expect("to find valid directories for storage");
 }
 
-pub async fn get_installed_versions_from_disk() -> anyhow::Result<Vec<InstalledVersion>> {
+pub async fn get_installed() -> anyhow::Result<Vec<InstalledVersion>> {
     let config_path = get_project_dirs().data_local_dir().join(CONFIG_FILENAME);
     if !fs::try_exists(&config_path).await? {
         return Ok(Vec::new());
@@ -26,7 +26,7 @@ pub async fn get_installed_versions_from_disk() -> anyhow::Result<Vec<InstalledV
     Ok(versions)
 }
 
-pub async fn dump_installed_versions(versions: Vec<InstalledVersion>) -> anyhow::Result<()> {
+pub async fn save_installed(versions: Vec<InstalledVersion>) -> anyhow::Result<()> {
     let config_path = get_project_dirs().data_local_dir().join(CONFIG_FILENAME);
 
     fs::create_dir_all(get_project_dirs().data_local_dir()).await?;

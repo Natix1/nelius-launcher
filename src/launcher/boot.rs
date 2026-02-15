@@ -8,10 +8,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use crate::{
-    downloader::{self, ManifestVersion},
-    installed_versions::{self, InstalledVersion},
-};
+use crate::launcher::{self, downloader::ManifestVersion, instances::InstalledVersion};
 
 pub const METADATA_FILENAME: &'static str = "nelius_metadata.lock";
 
@@ -26,7 +23,7 @@ pub struct InstallationMetadata {
 
 async fn launch(installed_version: &InstalledVersion) -> anyhow::Result<Child, anyhow::Error> {
     let game_dir =
-        installed_versions::get_project_dirs().data_local_dir().join("installations").join(&installed_version.id);
+        launcher::instances::get_project_dirs().data_local_dir().join("installations").join(&installed_version.id);
 
     fs::try_exists(&game_dir).await.context("the game directory was not found")?;
 
@@ -78,22 +75,19 @@ pub struct PlayResult {
 }
 
 pub async fn play(selected_version: &ManifestVersion) -> anyhow::Result<PlayResult, anyhow::Error> {
-    let installed = installed_versions::get_installed_versions_from_disk()
-        .await?
-        .iter()
-        .find(|v| v.version == selected_version.version_id)
-        .cloned();
+    let installed =
+        launcher::instances::get_installed().await?.iter().find(|v| v.version == selected_version.version_id).cloned();
 
     if let Some(installed) = installed {
         Ok(PlayResult { child: launch(&installed).await?, new_installation: None })
     } else {
         let installation_id = Uuid::new_v4().to_string();
         let installation_dir =
-            installed_versions::get_project_dirs().data_local_dir().join("installations").join(&installation_id);
+            launcher::instances::get_project_dirs().data_local_dir().join("installations").join(&installation_id);
 
         fs::create_dir_all(&installation_dir).await?;
-        let version_data = downloader::get_version_data(selected_version.version_id.clone()).await?;
-        downloader::install_minecraft(&version_data, &installation_dir).await?;
+        let version_data = launcher::downloader::get_version_data(selected_version.version_id.clone()).await?;
+        launcher::downloader::install_minecraft(&version_data, &installation_dir).await?;
 
         let new_installed_version =
             InstalledVersion { id: installation_id, version: selected_version.version_id.clone() };

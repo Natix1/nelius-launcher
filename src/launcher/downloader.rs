@@ -4,9 +4,9 @@ use serde_json::Value;
 use std::{env, fmt, path::PathBuf};
 use tokio::{fs, io::AsyncWriteExt, sync::OnceCell};
 
-use crate::{
-    launcher::{InstallationMetadata, METADATA_FILENAME},
-    reqwest_global_client::get_reqwest_client,
+use crate::launcher::{
+    boot::{InstallationMetadata, METADATA_FILENAME},
+    requests::reqwest_global_client::get_reqwest_client,
 };
 
 const CONCURRENT_DOWNLOADS_LIMIT: usize = 32;
