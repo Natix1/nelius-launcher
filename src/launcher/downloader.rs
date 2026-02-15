@@ -2,7 +2,7 @@ use anyhow::{Context, Ok};
 use futures::StreamExt;
 use serde_json::Value;
 use std::{env, fmt, path::PathBuf};
-use tokio::{fs, io::AsyncWriteExt, sync::OnceCell, task::JoinSet};
+use tokio::{fs, io::AsyncWriteExt, sync::OnceCell};
 use zip::ZipArchive;
 
 use crate::launcher::{
