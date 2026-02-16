@@ -1,4 +1,4 @@
-use std::process::Stdio;
+use std::{path::PathBuf, process::Stdio};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,10 @@ use tokio::{
     process::{Child, Command},
 };
 
-use crate::launcher::{self, downloader::ManifestVersion};
+use crate::{
+    Message,
+    launcher::{self, downloader::ManifestVersion},
+};
 
 pub const METADATA_FILENAME: &'static str = "nelius_metadata.lock";
 
@@ -20,7 +23,7 @@ pub struct InstallationMetadata {
     pub classpath_relative: Vec<String>,
 }
 
-async fn launch(installed_version: &String) -> anyhow::Result<Child, anyhow::Error> {
+async fn launch(installed_version: &String, java_binary: String) -> anyhow::Result<Child, anyhow::Error> {
     let game_dir =
         launcher::instances::get_project_dirs().data_local_dir().join("installations").join(&installed_version);
 
@@ -29,6 +32,7 @@ async fn launch(installed_version: &String) -> anyhow::Result<Child, anyhow::Err
     let metdata_dir = game_dir.join(METADATA_FILENAME);
     let contents = fs::read(metdata_dir).await?;
     let metadata: InstallationMetadata = serde_json::from_slice(&contents)?;
+    let natives_dir = game_dir.join("natives");
 
     let mut classpath_entries: Vec<String> = metadata
         .classpath_relative
@@ -40,10 +44,10 @@ async fn launch(installed_version: &String) -> anyhow::Result<Child, anyhow::Err
 
     let seperator = if std::env::consts::OS == "windows" { ";" } else { ":" };
     let classpath = classpath_entries.join(&seperator);
-    let mut cmd = Command::new("java");
 
+    let mut cmd = Command::new(java_binary);
     cmd.current_dir(&game_dir)
-        .arg(format!("-Djava.library.path={}", game_dir.join("natives").display()))
+        .arg(format!("-Djava.library.path={}", natives_dir.display()))
         .arg("-Xmx4G")
         .arg("-cp")
         .arg(classpath)
@@ -74,12 +78,16 @@ pub struct PlayResult {
     pub new_installation: Option<String>,
 }
 
-pub async fn play(selected_version: &ManifestVersion) -> anyhow::Result<PlayResult, anyhow::Error> {
+pub async fn play(
+    selected_version: &ManifestVersion,
+    logger: &mut iced::futures::channel::mpsc::Sender<Message>,
+    java_binary: String,
+) -> anyhow::Result<PlayResult, anyhow::Error> {
     let installed =
         launcher::instances::get_installed().await?.iter().find(|v| *v == &selected_version.version_id).cloned();
 
     if let Some(installed) = installed {
-        Ok(PlayResult { child: launch(&installed).await?, new_installation: None })
+        Ok(PlayResult { child: launch(&installed, java_binary).await?, new_installation: None })
     } else {
         let installation_dir = launcher::instances::get_project_dirs()
             .data_local_dir()
@@ -88,10 +96,10 @@ pub async fn play(selected_version: &ManifestVersion) -> anyhow::Result<PlayResu
 
         fs::create_dir_all(&installation_dir).await?;
         let version_data = launcher::downloader::get_version_data(selected_version.version_id.clone()).await?;
-        launcher::downloader::install_minecraft(&version_data, &installation_dir).await?;
+        launcher::downloader::install_minecraft(&version_data, &installation_dir, logger).await?;
 
         Ok(PlayResult {
-            child: launch(&selected_version.version_id).await?,
+            child: launch(&selected_version.version_id, java_binary).await?,
             new_installation: Some(selected_version.version_id.clone()),
         })
     }

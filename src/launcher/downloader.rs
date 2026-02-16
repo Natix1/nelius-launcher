@@ -1,13 +1,16 @@
 use anyhow::{Context, Ok};
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use serde_json::Value;
-use std::{env, fmt, path::PathBuf};
+use std::{collections::HashSet, env, fmt, path::PathBuf};
 use tokio::{fs, io::AsyncWriteExt, sync::OnceCell};
 use zip::ZipArchive;
 
-use crate::launcher::{
-    boot::{InstallationMetadata, METADATA_FILENAME},
-    requests::reqwest_global_client::get_reqwest_client,
+use crate::{
+    LogSource, Message,
+    launcher::{
+        boot::{InstallationMetadata, METADATA_FILENAME},
+        requests::reqwest_global_client::get_reqwest_client,
+    },
 };
 
 const CONCURRENT_DOWNLOADS_LIMIT: usize = 32;
@@ -270,14 +273,18 @@ fn extract_natives(jar_path: &PathBuf, natives_dir: &PathBuf) -> anyhow::Result<
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
         let name = file.name();
-        if name.ends_with(".dll") || name.ends_with(".so") || name.ends_with(".dylib") {
-            if let Some(filename) = file.enclosed_name().and_then(|p| p.file_name().map(|f| f.to_owned())) {
-                let out_path = natives_dir.join(filename);
 
-                let mut out_file = std::fs::File::create(&out_path)?;
-                std::io::copy(&mut file, &mut out_file)?;
-            }
+        if file.is_dir() {
+            continue;
         }
+
+        if !(name.ends_with(".dll") || name.ends_with(".so") || name.ends_with(".dylib")) {
+            continue;
+        }
+
+        let out_path = natives_dir.join(name);
+        let mut out_file = std::fs::File::create(&out_path)?;
+        std::io::copy(&mut file, &mut out_file)?;
     }
 
     Ok(())
@@ -289,7 +296,11 @@ struct ToDownload {
     is_native: bool,
 }
 
-pub async fn install_minecraft(version: &VersionData, directory: &PathBuf) -> anyhow::Result<(), anyhow::Error> {
+pub async fn install_minecraft(
+    version: &VersionData,
+    directory: &PathBuf,
+    logger: &mut iced::futures::channel::mpsc::Sender<Message>,
+) -> anyhow::Result<(), anyhow::Error> {
     fs::create_dir_all(directory.as_path()).await?;
 
     let mut classpath_relative: Vec<String> = Vec::with_capacity(256);
@@ -351,16 +362,33 @@ pub async fn install_minecraft(version: &VersionData, directory: &PathBuf) -> an
     let results = futures::stream::iter(files_to_download)
         .map(|task| {
             let client = get_reqwest_client();
+            let mut logger = logger.clone();
             let natives_directory = natives_directory.clone();
 
             async move {
+                let _ = logger
+                    .send(Message::SubmitLogLine(
+                        format!(
+                            "Downloading {} to {}...",
+                            task.download_uri,
+                            task.download_path.to_str().context("invalid download path in task")?
+                        ),
+                        LogSource::NeliusLauncher,
+                    ))
+                    .await;
                 let parent_path = task.download_path.parent().context("failed getting parent path")?;
                 fs::create_dir_all(parent_path).await?;
-                let response = client.get(task.download_uri).send().await?;
+                let response = client.get(&task.download_uri).send().await?;
                 let bytes = response.bytes().await?;
                 fs::write(&task.download_path, bytes).await?;
 
                 if task.is_native {
+                    let _ = logger
+                        .send(Message::SubmitLogLine(
+                            format!("Extracting {} to {}...", task.download_uri, natives_directory.display()),
+                            LogSource::NeliusLauncher,
+                        ))
+                        .await;
                     tokio::task::spawn_blocking(move || extract_natives(&task.download_path, &natives_directory))
                         .await?
                         .context("failed extracting natives")?;
