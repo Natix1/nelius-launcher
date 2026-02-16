@@ -1,7 +1,7 @@
 use anyhow::{Context, Ok};
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
-use std::{collections::HashSet, env, fmt, path::PathBuf};
+use std::{env, fmt, path::PathBuf};
 use tokio::{fs, io::AsyncWriteExt, sync::OnceCell};
 use zip::ZipArchive;
 
