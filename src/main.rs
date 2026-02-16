@@ -295,7 +295,7 @@ impl AppState {
                 async {
                     let mut builder = rfd::AsyncFileDialog::new();
                     if std::env::consts::OS == "windows" {
-                        builder = builder.add_filter("Executable files", &[".exe"]);
+                        builder = builder.add_filter("Executable files", &["exe"]);
                     }
                     let file = builder.pick_file().await;
                     if let Some(file) = file { Some(file.path().to_string_lossy().to_string()) } else { None }
