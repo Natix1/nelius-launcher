@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use anyhow::anyhow;
 use futures::SinkExt;
 use iced::{
