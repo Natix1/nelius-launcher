@@ -1,18 +1,23 @@
-use anyhow::{Context, Ok};
-use futures::{SinkExt, StreamExt};
+use anyhow::Context;
+use futures::{SinkExt, StreamExt, channel::mpsc::Sender};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{env, fmt, path::PathBuf};
-use tokio::{fs, io::AsyncWriteExt, sync::OnceCell};
+use std::{env, fmt, path::PathBuf, process::Stdio};
+use tokio::{
+    fs,
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    process::Command,
+    select,
+    sync::OnceCell,
+};
 use zip::ZipArchive;
 
 use crate::{
     LogSource, Message,
-    launcher::{
-        boot::{InstallationMetadata, METADATA_FILENAME},
-        requests::reqwest_global_client::get_reqwest_client,
-    },
+    launcher::{self, requests::reqwest_global_client::get_reqwest_client},
 };
 
+const METADATA_FILENAME: &'static str = "nelius_metadata.lock";
 const CONCURRENT_DOWNLOADS_LIMIT: usize = 32;
 const MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const RESOURCES_BASE_URL: &str = "https://resources.download.minecraft.net";
@@ -30,6 +35,137 @@ pub enum MinecraftCompatibleOS {
     Linux,
     OSX,
     Windows,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct InstallationMetadata {
+    pub main_class: String,
+    pub version: String,
+    pub asset_index_id: String,
+    pub client_jar_relative: String,
+    pub classpath_relative: Vec<String>,
+}
+
+impl InstallationMetadata {
+    pub fn create_launch_command(&self, game_dir: &PathBuf, java_binary: &str) -> Command {
+        let mut cmd = Command::new(java_binary);
+        let mut classpath_entries: Vec<String> = self
+            .classpath_relative
+            .iter()
+            .map(|relative| game_dir.join(relative).to_string_lossy().into_owned())
+            .collect();
+
+        classpath_entries.push(game_dir.join(&self.client_jar_relative).to_string_lossy().into_owned());
+
+        let natives_dir = game_dir.join("natives");
+        let seperator = if std::env::consts::OS == "windows" { ";" } else { ":" };
+        let classpath = classpath_entries.join(&seperator);
+
+        cmd.current_dir(&game_dir)
+            .arg(format!("-Djava.library.path={}", natives_dir.display()))
+            .arg("-Xmx4G")
+            .arg("-cp")
+            .arg(classpath)
+            .arg(&self.main_class)
+            .arg("--username")
+            .arg("Nelius")
+            .arg("--version")
+            .arg(&self.version)
+            .arg("--gameDir")
+            .arg(&game_dir)
+            .arg("-assetsDir")
+            .arg(&game_dir.join("assets"))
+            .arg("--assetIndex")
+            .arg(&self.asset_index_id)
+            .arg("--uuid")
+            .arg("0")
+            .arg("--accessToken")
+            .arg("0")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        cmd
+    }
+}
+
+pub struct GameInstance {
+    pub version_id: String,
+    pub directory: PathBuf,
+    pub metadata: Option<InstallationMetadata>,
+}
+
+impl GameInstance {
+    pub fn new(version_id: String) -> Self {
+        let dir = launcher::instances::get_project_dirs().data_local_dir().join("installations").join(&version_id);
+        GameInstance { version_id: version_id, directory: dir, metadata: None }
+    }
+
+    pub async fn is_installed(&self) -> bool {
+        let lock_file = self.directory.join(METADATA_FILENAME);
+
+        fs::try_exists(lock_file).await.unwrap_or(false)
+    }
+
+    pub async fn ensure_installed(&mut self, logger: &mut Sender<Message>) -> anyhow::Result<()> {
+        let lock_file = self.directory.join(METADATA_FILENAME);
+        if !fs::try_exists(&lock_file).await.unwrap_or(false) {
+            fs::create_dir_all(&self.directory).await?;
+            let data = launcher::downloader::get_version_data(self.version_id.clone()).await?;
+            launcher::downloader::install_minecraft(&data, &self.directory, logger).await?;
+        }
+
+        let contents = fs::read(&lock_file).await?;
+        self.metadata = Some(serde_json::from_slice(&contents)?);
+
+        Ok(())
+    }
+
+    pub async fn run(&self, java_binary: &str, logger: &mut Sender<Message>) -> anyhow::Result<()> {
+        let meta = self.metadata.as_ref().context("No metadata available")?;
+        let mut cmd = meta.create_launch_command(&self.directory, java_binary);
+
+        let mut child = cmd.spawn()?;
+        let stdout = child.stdout.take().context("failed taking stdout from child")?;
+        let stderr = child.stderr.take().context("failed taking stderr from child")?;
+
+        let mut stdout = BufReader::new(stdout).lines();
+        let mut stderr = BufReader::new(stderr).lines();
+
+        loop {
+            select! {
+                result = stdout.next_line() => {
+                    match result {
+                        Ok(Some(line)) => {
+                            let _ = logger.send(Message::SubmitLogLine(line, LogSource::Minecraft)).await;
+                        },
+                        Ok(None) => break,
+                        Err(e) => {
+                            eprintln!("Failed reading stdout: {}", e);
+                            break;
+                        }
+                    };
+                }
+
+                result = stderr.next_line() => {
+                    match result {
+                        Ok(Some(line)) => {
+                            let _ = logger.send(Message::SubmitLogLine(line, LogSource::Minecraft)).await;
+                        },
+                        Ok(None) => break,
+                        Err(e) => {
+                            eprintln!("Failed reading stderr: {}", e);
+                        }
+                    };
+                }
+
+                _ = child.wait() => {
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,7 +298,7 @@ impl VersionData {
 
 async fn get_manifest() -> anyhow::Result<&'static Manifest> {
     MANIFEST
-        .get_or_try_init(async || {
+        .get_or_try_init(async || -> anyhow::Result<Manifest, anyhow::Error> {
             let response: Value = get_reqwest_client().get(MANIFEST_URL.to_string()).send().await?.json().await?;
 
             let raw_versions =
@@ -359,7 +495,7 @@ pub async fn install_minecraft(
         files_to_download.push(ToDownload { download_uri: uri, download_path: path, is_native: false });
     }
 
-    let results = futures::stream::iter(files_to_download)
+    let results: Vec<anyhow::Result<()>> = futures::stream::iter(files_to_download)
         .map(|task| {
             let client = get_reqwest_client();
             let mut logger = logger.clone();

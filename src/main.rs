@@ -9,11 +9,10 @@ use iced::{
 };
 
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, BufReader};
 
 const MAX_LOGS_LENGTH: usize = 1000;
 
-use crate::launcher::downloader::{ManifestVersion, VersionType};
+use crate::launcher::downloader::{GameInstance, ManifestVersion, VersionType};
 
 mod launcher;
 
@@ -30,6 +29,7 @@ pub struct LauncherConfig {
     pub java_binary: Option<String>,
     pub show_releases: bool,
     pub show_snapshots: bool,
+    pub selected_version: Option<String>,
 }
 
 impl LauncherConfig {
@@ -55,9 +55,8 @@ impl LauncherConfig {
 struct AppState {
     config: LauncherConfig,
 
-    selected_version: Option<ManifestVersion>,
     all_versions: Result<Vec<ManifestVersion>, String>,
-    filtered_versions: Vec<ManifestVersion>,
+    filtered_versions: Vec<String>,
     installed_versions: Vec<String>,
     logs: String,
     game_locked: bool,
@@ -71,7 +70,6 @@ impl Default for AppState {
         AppState {
             config: config,
 
-            selected_version: None,
             all_versions: Ok(Vec::with_capacity(1024)),
             filtered_versions: Vec::with_capacity(1024),
             installed_versions: Vec::new(),
@@ -84,17 +82,21 @@ impl Default for AppState {
 
 #[derive(Clone, Debug)]
 enum Message {
-    VersionChanged(ManifestVersion),
+    VersionChanged(String),
     MinecraftVersionsLoaded(Result<Vec<ManifestVersion>, String>),
     InstalledVersionsLoaded(Result<Vec<String>, String>),
     ShowReleasesUpdated(bool),
     ShowSnapshotsUpdated(bool),
     StartGameRequest,
-    MinecraftLaunched(Result<Option<String>, String>),
+    MinecraftLaunched(Option<String>),
     SubmitLogLine(String, LogSource),
-    GameClosed,
+    MinecraftClosed,
     ChangeJavaBinaryRequested,
     SetJavaBinary(Option<String>),
+}
+
+fn log_error_task(contents: String, log_source: LogSource) -> Task<Message> {
+    Task::perform(async move { (contents, log_source) }, |(contents, source)| Message::SubmitLogLine(contents, source))
 }
 
 impl AppState {
@@ -128,67 +130,6 @@ impl AppState {
         (AppState::default(), Task::batch([fetch_versions, load_installed_versions, greet]))
     }
 
-    pub async fn run_game_and_stream_logs(
-        version: ManifestVersion,
-        mut output: iced::futures::channel::mpsc::Sender<Message>,
-        java_binary: String,
-    ) {
-        match launcher::boot::play(&version, &mut output, java_binary).await {
-            Ok(mut play_result) => {
-                let _ = output.send(Message::MinecraftLaunched(Ok(play_result.new_installation))).await;
-                let stdout = play_result.child.stdout.take().expect("could not take stdout");
-                let stderr = play_result.child.stderr.take().expect("could not take stderr");
-
-                let mut stdout = BufReader::new(stdout).lines();
-                let mut stdin = BufReader::new(stderr).lines();
-
-                loop {
-                    tokio::select! {
-                        result = stdout.next_line() => {
-                            match result {
-                                Ok(Some(line)) => {
-                                    let _ = output.send(Message::SubmitLogLine(line, LogSource::Minecraft)).await;
-                                },
-                                Ok(None) => break,
-                                Err(e) => {
-                                    eprintln!("Failed reading stdout: {}", e);
-                                    break;
-                                }
-                            };
-                        }
-
-                        result = stdin.next_line() => {
-                            match result {
-                                Ok(Some(line)) => {
-                                    let _ = output.send(Message::SubmitLogLine(line, LogSource::Minecraft)).await;
-                                },
-                                Ok(None) => break,
-                                Err(e) => {
-                                    eprintln!("Failed reading stderr: {}", e);
-                                }
-                            };
-                        }
-
-                        _ = play_result.child.wait() => {
-                            break;
-                        }
-                    }
-                }
-                let _ = output.send(Message::GameClosed).await;
-            }
-            Err(e) => {
-                eprintln!("Error while launching / downloading minecraft: {}", e);
-                let _ = output.send(Message::MinecraftLaunched(Err(e.to_string()))).await;
-                let _ = output
-                    .send(Message::SubmitLogLine(
-                        format!("Failed launching minecraft: {}", e),
-                        LogSource::NeliusLauncher,
-                    ))
-                    .await;
-            }
-        }
-    }
-
     fn refresh_filtered_versions(&mut self) {
         if let Ok(versions) = &self.all_versions {
             self.filtered_versions = versions
@@ -198,6 +139,7 @@ impl AppState {
                     VersionType::Snapshot => self.config.show_snapshots,
                     VersionType::Unknown => true,
                 })
+                .map(|v| &v.version_id)
                 .cloned()
                 .collect()
         }
@@ -230,7 +172,7 @@ impl AppState {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::VersionChanged(version) => {
-                self.selected_version = Some(version);
+                self.config.selected_version = Some(version);
                 Task::none()
             }
             Message::MinecraftVersionsLoaded(versions) => {
@@ -249,23 +191,67 @@ impl AppState {
                 Task::none()
             }
             Message::StartGameRequest => {
-                let Some(version) = self.selected_version.clone() else {
-                    return Task::none();
-                };
-
                 self.game_locked = true;
 
-                if let Some(java_binary) = &self.config.java_binary {
-                    let java_binary = java_binary.clone();
-                    Task::run(
-                        stream::channel(100, move |output| {
-                            AppState::run_game_and_stream_logs(version, output, java_binary)
-                        }),
-                        |msg| msg,
-                    )
-                } else {
-                    Task::none()
-                }
+                let selected_version = match &self.config.selected_version {
+                    Some(version) => version.clone(),
+                    None => {
+                        return log_error_task(
+                            "No version selected - couldn't launch".to_string(),
+                            LogSource::NeliusLauncher,
+                        );
+                    }
+                };
+
+                let binary = match &self.config.java_binary {
+                    Some(binary) => binary.to_string(),
+                    None => {
+                        return log_error_task(
+                            "No java binary selected - couldn't launch".to_string(),
+                            LogSource::NeliusLauncher,
+                        );
+                    }
+                };
+
+                Task::run(
+                    stream::channel(100, move |mut logger: futures::channel::mpsc::Sender<Message>| async move {
+                        let mut instance = GameInstance::new(selected_version);
+                        let was_installed = instance.is_installed().await;
+                        match instance.ensure_installed(&mut logger).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                let _ = logger
+                                    .send(Message::SubmitLogLine(
+                                        format!("Couldn't check installation status: {}", e),
+                                        LogSource::NeliusLauncher,
+                                    ))
+                                    .await;
+                                return;
+                            }
+                        };
+
+                        if was_installed {
+                            let _ = logger.send(Message::MinecraftLaunched(None)).await;
+                        } else {
+                            let _ = logger.send(Message::MinecraftLaunched(Some(instance.version_id.clone()))).await;
+                        }
+
+                        match instance.run(&binary, &mut logger).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                let _ = logger
+                                    .send(Message::SubmitLogLine(
+                                        format!("Couldn't start the game: {}", e),
+                                        LogSource::NeliusLauncher,
+                                    ))
+                                    .await;
+                                return;
+                            }
+                        };
+                        let _ = logger.send(Message::MinecraftClosed).await;
+                    }),
+                    |v| v,
+                )
             }
             Message::InstalledVersionsLoaded(versions) => {
                 if let Ok(versions) = versions {
@@ -276,13 +262,13 @@ impl AppState {
                 Task::none()
             }
             Message::MinecraftLaunched(installed_version) => match installed_version {
-                Ok(Some(version)) => {
+                Some(version) => {
                     self.installed_versions.push(version);
                     Task::none()
                 }
                 _ => Task::none(),
             },
-            Message::GameClosed => {
+            Message::MinecraftClosed => {
                 self.game_locked = false;
                 Task::none()
             }
@@ -313,8 +299,8 @@ impl AppState {
         let status_text = match &self.all_versions {
             Ok(v) if v.is_empty() => text("Loading version information, hang tight!").color(color!(255, 255, 0)),
             Ok(_) => {
-                if let Some(version) = &self.selected_version {
-                    let is_installed = self.installed_versions.iter().any(|v| v == &version.version_id);
+                if let Some(version) = &self.config.selected_version {
+                    let is_installed = self.installed_versions.iter().any(|v| v == version);
                     if is_installed {
                         text("This version is installed on disk! Will launch immediately.").color(color!(0, 255, 0))
                     } else {
@@ -329,11 +315,11 @@ impl AppState {
         };
 
         let dropdown =
-            pick_list(self.filtered_versions.as_slice(), self.selected_version.clone(), Message::VersionChanged)
+            pick_list(self.filtered_versions.as_slice(), self.config.selected_version.clone(), Message::VersionChanged)
                 .placeholder("Select version");
 
         let mut play_button = button("Play!");
-        if self.selected_version.is_some() && self.config.java_binary.is_some() && !self.game_locked {
+        if self.config.selected_version.is_some() && self.config.java_binary.is_some() && !self.game_locked {
             play_button = play_button.on_press(Message::StartGameRequest).style(button::success);
         } else {
             play_button = play_button.style(button::secondary)
