@@ -2,7 +2,7 @@ use iced::Task;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
-use crate::{Message, launcher};
+use crate::{launcher, ui::message::Message};
 
 /// Do not mutate directly.
 /// Use [update()].
