@@ -12,12 +12,14 @@ use iced::{
     widget::{self, button, checkbox, column, container, pick_list, row, scrollable, text},
 };
 
-use serde::{Deserialize, Serialize};
-
 const MAX_LOGS_LENGTH: usize = 5000;
 
-use crate::launcher::downloader::{GameInstance, ManifestVersion, VersionType};
+use crate::{
+    app::persistent_state::PersistentAppState,
+    launcher::downloader::{GameInstance, ManifestVersion, VersionType},
+};
 
+mod app;
 mod launcher;
 
 #[derive(Clone, Debug)]
@@ -28,49 +30,8 @@ enum LogSource {
     Unknown, /* reserved for future use */
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct PersistentAppState {
-    pub java_binary: Option<String>,
-    pub show_releases: bool,
-    pub show_snapshots: bool,
-    pub auto_scroll: bool,
-    pub selected_version: Option<String>,
-}
-
-impl PersistentAppState {
-    pub fn load() -> Self {
-        let config_path = launcher::instances::get_project_dirs().config_dir().join("nelius-state.json");
-        std::fs::read_to_string(config_path)
-            .ok()
-            .and_then(|contents| serde_json::from_str(&contents).ok())
-            .unwrap_or_default()
-    }
-
-    pub fn save(&self) -> anyhow::Result<()> {
-        let proj_dirs = launcher::instances::get_project_dirs();
-        let config_dir = proj_dirs.config_dir();
-        std::fs::create_dir_all(&config_dir)?;
-        let contents = serde_json::to_string_pretty(self)?;
-        std::fs::write(config_dir.join("nelius-state.json"), contents)?;
-
-        Ok(())
-    }
-}
-
-impl Default for PersistentAppState {
-    fn default() -> Self {
-        PersistentAppState {
-            java_binary: None,
-            show_releases: true,
-            show_snapshots: false,
-            auto_scroll: true,
-            selected_version: None,
-        }
-    }
-}
-
 struct AppState {
-    __persistent: PersistentAppState,
+    persistent: PersistentAppState,
 
     all_versions: Result<Vec<ManifestVersion>, String>,
     filtered_versions: Vec<String>,
@@ -85,7 +46,7 @@ impl Default for AppState {
         let config = PersistentAppState::load();
 
         AppState {
-            __persistent: config,
+            persistent: config,
 
             all_versions: Ok(Vec::with_capacity(1024)),
             filtered_versions: Vec::with_capacity(1024),
@@ -111,6 +72,7 @@ enum Message {
     ChangeJavaBinaryRequested,
     SetJavaBinary(Option<String>),
     AutoScrollLogsToggled(bool),
+    PersistentStateSaved(Result<(), String>),
 }
 
 fn log_error_task(contents: String, log_source: LogSource) -> Task<Message> {
@@ -153,8 +115,8 @@ impl AppState {
             self.filtered_versions = versions
                 .iter()
                 .filter(|v| match v.version_type {
-                    VersionType::Release => self.get_persistent_state().show_releases,
-                    VersionType::Snapshot => self.get_persistent_state().show_snapshots,
+                    VersionType::Release => self.persistent.show_releases,
+                    VersionType::Snapshot => self.persistent.show_snapshots,
                     VersionType::Unknown => true,
                 })
                 .map(|v| &v.version_id)
@@ -177,25 +139,11 @@ impl AppState {
         }
     }
 
-    fn update_persistent_state<F>(&mut self, f: F)
-    where
-        F: FnOnce(&mut PersistentAppState),
-    {
-        f(&mut self.__persistent);
-        if let Err(e) = self.__persistent.save() {
-            self.append_log(format!("Failed to save config: {}", e), LogSource::NeliusLauncher);
-        }
-    }
-
-    fn get_persistent_state(&self) -> &PersistentAppState {
-        &self.__persistent
-    }
-
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::VersionChanged(version) => {
-                self.update_persistent_state(|p| p.selected_version = Some(version));
-                Task::none()
+                self.persistent.selected_version = Some(version);
+                self.persistent.save_task()
             }
             Message::MinecraftVersionsLoaded(versions) => {
                 self.all_versions = versions;
@@ -203,19 +151,19 @@ impl AppState {
                 Task::none()
             }
             Message::ShowReleasesUpdated(show) => {
-                self.update_persistent_state(|p| p.show_releases = show);
+                self.persistent.show_releases = show;
                 self.refresh_filtered_versions();
-                Task::none()
+                self.persistent.save_task()
             }
             Message::ShowSnapshotsUpdated(show) => {
-                self.update_persistent_state(|p| p.show_snapshots = show);
+                self.persistent.show_snapshots = show;
                 self.refresh_filtered_versions();
-                Task::none()
+                self.persistent.save_task()
             }
             Message::StartGameRequest => {
                 self.game_locked = true;
 
-                let selected_version = match &self.get_persistent_state().selected_version {
+                let selected_version = match &self.persistent.selected_version {
                     Some(version) => version.clone(),
                     None => {
                         return log_error_task(
@@ -225,7 +173,7 @@ impl AppState {
                     }
                 };
 
-                let binary = match &self.get_persistent_state().java_binary {
+                let binary = match &self.persistent.java_binary {
                     Some(binary) => binary.to_string(),
                     None => {
                         return log_error_task(
@@ -298,7 +246,7 @@ impl AppState {
                 println!("Received log line: {}", line);
                 self.append_log(line, source);
 
-                if self.get_persistent_state().auto_scroll {
+                if self.persistent.auto_scroll {
                     return iced::widget::operation::snap_to(
                         self.scrollable_id.clone(),
                         scrollable::RelativeOffset::END,
@@ -319,11 +267,23 @@ impl AppState {
                 Message::SetJavaBinary,
             ),
             Message::SetJavaBinary(binary) => {
-                self.update_persistent_state(|p| p.java_binary = binary);
-                Task::none()
+                self.persistent.java_binary = binary;
+                self.persistent.save_task()
             }
             Message::AutoScrollLogsToggled(enabled) => {
-                self.update_persistent_state(|p| p.auto_scroll = enabled);
+                self.persistent.auto_scroll = enabled;
+                self.persistent.save_task()
+            }
+            Message::PersistentStateSaved(result) => {
+                match result {
+                    Ok(_) => {
+                        println!("Persistent state saved.");
+                    }
+                    Err(e) => {
+                        self.append_log(format!("Failed saving persistent app state: {}", e), LogSource::NeliusLauncher)
+                    }
+                }
+
                 Task::none()
             }
         }
@@ -333,7 +293,7 @@ impl AppState {
         let status_text = match &self.all_versions {
             Ok(v) if v.is_empty() => text("Loading version information, hang tight!").color(color!(255, 255, 0)),
             Ok(_) => {
-                if let Some(version) = &self.get_persistent_state().selected_version {
+                if let Some(version) = &self.persistent.selected_version {
                     let is_installed = self.installed_versions.iter().any(|v| v == version);
                     if is_installed {
                         text("This version is installed on disk! Will launch immediately.").color(color!(0, 255, 0))
@@ -350,16 +310,13 @@ impl AppState {
 
         let dropdown = pick_list(
             self.filtered_versions.as_slice(),
-            self.get_persistent_state().selected_version.clone(),
+            self.persistent.selected_version.clone(),
             Message::VersionChanged,
         )
         .placeholder("Select version");
 
         let mut play_button = button("Play!");
-        if self.get_persistent_state().selected_version.is_some()
-            && self.get_persistent_state().java_binary.is_some()
-            && !self.game_locked
-        {
+        if self.persistent.selected_version.is_some() && self.persistent.java_binary.is_some() && !self.game_locked {
             play_button = play_button.on_press(Message::StartGameRequest).style(button::success);
         } else {
             play_button = play_button.style(button::secondary)
@@ -369,20 +326,15 @@ impl AppState {
             column![
                 dropdown,
                 status_text,
-                checkbox(self.get_persistent_state().show_releases)
-                    .label("Show releases")
-                    .on_toggle(Message::ShowReleasesUpdated),
-                checkbox(self.get_persistent_state().show_snapshots)
+                checkbox(self.persistent.show_releases).label("Show releases").on_toggle(Message::ShowReleasesUpdated),
+                checkbox(self.persistent.show_snapshots)
                     .label("Show snapshots")
                     .on_toggle(Message::ShowSnapshotsUpdated),
-                text(format!(
-                    "Java binary: {}",
-                    self.get_persistent_state().java_binary.clone().unwrap_or("None!".to_string())
-                )),
+                text(format!("Java binary: {}", self.persistent.java_binary.clone().unwrap_or("None!".to_string()))),
                 button("Change Java binary").style(button::primary).on_press(Message::ChangeJavaBinaryRequested),
                 row![play_button].spacing(10),
                 container(
-                    checkbox(self.get_persistent_state().auto_scroll)
+                    checkbox(self.persistent.auto_scroll)
                         .label("Auto-scroll logs")
                         .width(Fill)
                         .on_toggle(Message::AutoScrollLogsToggled)
