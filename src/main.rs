@@ -3,8 +3,6 @@
 use anyhow::anyhow;
 use iced::Theme;
 
-const MAX_LOGS_LENGTH: usize = 5000;
-
 use crate::{model::state::AppState, ui::message::Message};
 
 mod launcher;

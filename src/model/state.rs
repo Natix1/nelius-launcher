@@ -1,6 +1,9 @@
 use iced::widget;
 
-use crate::{MAX_LOGS_LENGTH, launcher::downloader::ManifestVersion, model::persistent_state::PersistentAppState};
+use crate::{
+    launcher::downloader::ManifestVersion,
+    model::{MAX_LOGS_LENGTH, persistent_state::PersistentAppState},
+};
 
 pub struct AppState {
     pub persistent: PersistentAppState,
