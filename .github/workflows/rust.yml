@@ -11,6 +11,16 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x86_64
+            binary_name: nelius-launcher
+          - os: macos-latest
+            suffix: macos-x86_64
+            binary_name: nelius-launcher
+          - os: windows-latest
+            suffix: windows-x86_64.exe
+            binary_name: nelius-launcher.exe
 
     permissions:
       contents: write
@@ -27,9 +37,15 @@ jobs:
       - name: Build
         run: cargo build --release
 
+      - name: Rename to appropriate platform
+        shell: bash
+        run: | 
+          mkdir -p assets
+          cp target/release/${{ matrix.binary_name }} assets/nelius-launcher-${{ matrix.suffix }}
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/release/nelius-launcher*
+          files: assets/nelius-launcher-${{ matrix.suffix }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
