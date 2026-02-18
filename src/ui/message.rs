@@ -1,4 +1,12 @@
-use crate::{LogSource, launcher::downloader::ManifestVersion};
+use crate::launcher::downloader::ManifestVersion;
+
+#[derive(Clone, Debug)]
+pub enum LogSource {
+    NeliusLauncher,
+    Minecraft,
+    #[allow(dead_code)]
+    Unknown, /* reserved for future use */
+}
 
 #[derive(Clone, Debug)]
 pub enum Message {

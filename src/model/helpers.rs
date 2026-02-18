@@ -2,10 +2,10 @@ use futures::SinkExt;
 use iced::{Task, stream};
 
 use crate::{
-    LogSource, MAX_LOGS_LENGTH,
+    MAX_LOGS_LENGTH,
     launcher::downloader::{GameInstance, VersionType},
     model::state::AppState,
-    ui::message::Message,
+    ui::message::{LogSource, Message},
 };
 
 impl AppState {

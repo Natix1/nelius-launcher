@@ -1,6 +1,10 @@
 use iced::Task;
 
-use crate::{LogSource, launcher, model::state::AppState, ui::message::Message};
+use crate::{
+    launcher,
+    model::state::AppState,
+    ui::message::{LogSource, Message},
+};
 
 impl AppState {
     pub fn init() -> (Self, Task<Message>) {

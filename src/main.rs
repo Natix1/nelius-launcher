@@ -11,14 +11,6 @@ mod launcher;
 mod model;
 mod ui;
 
-#[derive(Clone, Debug)]
-enum LogSource {
-    NeliusLauncher,
-    Minecraft,
-    #[allow(dead_code)]
-    Unknown, /* reserved for future use */
-}
-
 fn main() -> anyhow::Result<()> {
     let result = iced::application(AppState::init, AppState::update, AppState::view)
         .theme(Theme::GruvboxDark)

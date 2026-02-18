@@ -13,8 +13,9 @@ use tokio::{
 use zip::ZipArchive;
 
 use crate::{
-    LogSource, Message,
+    Message,
     launcher::{self, requests::reqwest_global_client::get_reqwest_client},
+    ui::message::LogSource,
 };
 
 const METADATA_FILENAME: &'static str = "nelius_metadata.lock";

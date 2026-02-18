@@ -1,6 +1,10 @@
 use iced::{Task, widget::scrollable};
 
-use crate::{LogSource, launcher::downloader::GameInstance, model::state::AppState, ui::message::Message};
+use crate::{
+    launcher::downloader::GameInstance,
+    model::state::AppState,
+    ui::message::{LogSource, Message},
+};
 
 impl AppState {
     pub fn update(&mut self, message: Message) -> Task<Message> {
