@@ -30,8 +30,6 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            target/release/nelius-launcher
-            target/release/nelius-launcher.exe
+          files: target/release/nelius-launcher*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
