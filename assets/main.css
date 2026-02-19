@@ -1,0 +1,18 @@
+/* 270722 for background */
+/* DBDBDB for text */
+
+html,
+body,
+#main {
+    background-color: #202326;
+    color: #DBDBDB;
+    font-family: "Fira Code";
+}
+
+body {
+    padding: 20px;
+}
+
+select {
+    background-color: black;
+}
