@@ -1,5 +1,6 @@
+#![allow(dead_code, unused)]
 use anyhow::Context;
-use futures::{SinkExt, StreamExt, channel::mpsc::Sender};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{env, fmt, path::PathBuf, process::Stdio};
@@ -12,11 +13,8 @@ use tokio::{
 };
 use zip::ZipArchive;
 
-use crate::{
-    Message,
-    launcher::{self, requests::reqwest_global_client::get_reqwest_client},
-    ui::message::LogSource,
-};
+use crate::launcher::{self, requests::reqwest_global_client::get_reqwest_client};
+pub type Logger = std::sync::Arc<dyn Fn(String) + Send + Sync + 'static>;
 
 const METADATA_FILENAME: &'static str = "nelius_metadata.lock";
 const CONCURRENT_DOWNLOADS_LIMIT: usize = 32;
@@ -107,7 +105,7 @@ impl GameInstance {
         fs::try_exists(lock_file).await.unwrap_or(false)
     }
 
-    pub async fn ensure_installed(&mut self, logger: &mut Sender<Message>) -> anyhow::Result<()> {
+    pub async fn ensure_installed(&mut self, logger: Logger) -> anyhow::Result<()> {
         let lock_file = self.directory.join(METADATA_FILENAME);
         if !fs::try_exists(&lock_file).await.unwrap_or(false) {
             fs::create_dir_all(&self.directory).await?;
@@ -121,7 +119,7 @@ impl GameInstance {
         Ok(())
     }
 
-    pub async fn run(&self, java_binary: &str, logger: &mut Sender<Message>) -> anyhow::Result<()> {
+    pub async fn run(&self, java_binary: &str, logger: Logger) -> anyhow::Result<()> {
         let meta = self.metadata.as_ref().context("No metadata available")?;
         let mut cmd = meta.create_launch_command(&self.directory, java_binary);
 
@@ -137,7 +135,7 @@ impl GameInstance {
                 result = stdout.next_line() => {
                     match result {
                         Ok(Some(line)) => {
-                            let _ = logger.send(Message::SubmitLogLine(line, LogSource::Minecraft)).await;
+                            logger(line);
                         },
                         Ok(None) => break,
                         Err(e) => {
@@ -150,7 +148,7 @@ impl GameInstance {
                 result = stderr.next_line() => {
                     match result {
                         Ok(Some(line)) => {
-                            let _ = logger.send(Message::SubmitLogLine(line, LogSource::Minecraft)).await;
+                            logger(line);
                         },
                         Ok(None) => break,
                         Err(e) => {
@@ -436,7 +434,7 @@ struct ToDownload {
 pub async fn install_minecraft(
     version: &VersionData,
     directory: &PathBuf,
-    logger: &mut iced::futures::channel::mpsc::Sender<Message>,
+    logger: Logger,
 ) -> anyhow::Result<(), anyhow::Error> {
     fs::create_dir_all(directory.as_path()).await?;
 
@@ -499,20 +497,15 @@ pub async fn install_minecraft(
     let results: Vec<anyhow::Result<()>> = futures::stream::iter(files_to_download)
         .map(|task| {
             let client = get_reqwest_client();
-            let mut logger = logger.clone();
+            let logger = logger.clone();
             let natives_directory = natives_directory.clone();
 
             async move {
-                let _ = logger
-                    .send(Message::SubmitLogLine(
-                        format!(
-                            "Downloading {} to {}...",
-                            task.download_uri,
-                            task.download_path.to_str().context("invalid download path in task")?
-                        ),
-                        LogSource::NeliusLauncher,
-                    ))
-                    .await;
+                logger(format!(
+                    "Downloading {} to {}...",
+                    task.download_uri,
+                    task.download_path.to_str().context("invalid download path in task")?
+                ));
                 let parent_path = task.download_path.parent().context("failed getting parent path")?;
                 fs::create_dir_all(parent_path).await?;
                 let response = client.get(&task.download_uri).send().await?;
@@ -520,12 +513,7 @@ pub async fn install_minecraft(
                 fs::write(&task.download_path, bytes).await?;
 
                 if task.is_native {
-                    let _ = logger
-                        .send(Message::SubmitLogLine(
-                            format!("Extracting {} to {}...", task.download_uri, natives_directory.display()),
-                            LogSource::NeliusLauncher,
-                        ))
-                        .await;
+                    logger(format!("Extracting {} to {}...", task.download_uri, natives_directory.display()));
                     tokio::task::spawn_blocking(move || extract_natives(&task.download_path, &natives_directory))
                         .await?
                         .context("failed extracting natives")?;

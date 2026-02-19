@@ -1,3 +1,5 @@
+#![allow(dead_code, unused)]
+
 use directories::ProjectDirs;
 use tokio::fs;
 pub fn get_project_dirs() -> ProjectDirs {
