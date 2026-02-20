@@ -3,7 +3,7 @@
 use directories::ProjectDirs;
 use tokio::fs;
 pub fn get_project_dirs() -> ProjectDirs {
-    return ProjectDirs::from("dev", "natix", "nelius-launcher").expect("to find valid directories for storage");
+    ProjectDirs::from("dev", "natix", "nelius-launcher").expect("to find valid directories for storage")
 }
 
 pub async fn get_installed() -> anyhow::Result<Vec<String>> {

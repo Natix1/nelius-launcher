@@ -56,7 +56,7 @@ fn App() -> Element {
         document::Link { rel: "stylesheet", href: DIOXUS_COMPONENTS_CSS }
 
         div {
-            class: "rounded-3xl flex flex-row items-center w-full h-screen space-x-6 items-center pr-5 pl-5",
+            class: "rounded-3xl flex flex-row items-center w-full h-screen space-x-3 items-center pr-3 pl-3 pb-3 pt-3",
             VersionListSidebar {  }
             VersionDetailsPane {  }
         }

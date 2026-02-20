@@ -16,7 +16,7 @@ use zip::ZipArchive;
 use crate::launcher::{self, requests::reqwest_global_client::get_reqwest_client};
 pub type Logger = std::sync::Arc<dyn Fn(String) + Send + Sync + 'static>;
 
-const METADATA_FILENAME: &'static str = "nelius_metadata.lock";
+const METADATA_FILENAME: &str = "nelius_metadata.lock";
 const CONCURRENT_DOWNLOADS_LIMIT: usize = 32;
 const MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const RESOURCES_BASE_URL: &str = "https://resources.download.minecraft.net";
@@ -32,7 +32,7 @@ pub enum VersionType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MinecraftCompatibleOS {
     Linux,
-    OSX,
+    Osx,
     Windows,
 }
 
@@ -58,9 +58,9 @@ impl InstallationMetadata {
 
         let natives_dir = game_dir.join("natives");
         let seperator = if std::env::consts::OS == "windows" { ";" } else { ":" };
-        let classpath = classpath_entries.join(&seperator);
+        let classpath = classpath_entries.join(seperator);
 
-        cmd.current_dir(&game_dir)
+        cmd.current_dir(game_dir)
             .arg(format!("-Djava.library.path={}", natives_dir.display()))
             .arg("-Xmx4G")
             .arg("-cp")
@@ -71,9 +71,9 @@ impl InstallationMetadata {
             .arg("--version")
             .arg(&self.version)
             .arg("--gameDir")
-            .arg(&game_dir)
+            .arg(game_dir)
             .arg("-assetsDir")
-            .arg(&game_dir.join("assets"))
+            .arg(game_dir.join("assets"))
             .arg("--assetIndex")
             .arg(&self.asset_index_id)
             .arg("--uuid")
@@ -96,7 +96,7 @@ pub struct GameInstance {
 impl GameInstance {
     pub fn new(version_id: String) -> Self {
         let dir = launcher::instances::get_project_dirs().data_local_dir().join("installations").join(&version_id);
-        GameInstance { version_id: version_id, directory: dir, metadata: None }
+        GameInstance { version_id, directory: dir, metadata: None }
     }
 
     pub async fn is_installed(&self) -> bool {
@@ -201,7 +201,7 @@ impl Library {
     pub fn is_needed_for_this_os(&self) -> bool {
         match self.specific_os {
             Some(MinecraftCompatibleOS::Linux) => env::consts::OS == "linux",
-            Some(MinecraftCompatibleOS::OSX) => env::consts::OS == "macos",
+            Some(MinecraftCompatibleOS::Osx) => env::consts::OS == "macos",
             Some(MinecraftCompatibleOS::Windows) => env::consts::OS == "windows",
 
             _ => true,
@@ -262,7 +262,7 @@ impl Library {
 
             system = match raw_system {
                 "linux" => Some(MinecraftCompatibleOS::Linux),
-                "osx" => Some(MinecraftCompatibleOS::OSX),
+                "osx" => Some(MinecraftCompatibleOS::Osx),
                 "windows" => Some(MinecraftCompatibleOS::Windows),
 
                 _ => None,
@@ -272,9 +272,9 @@ impl Library {
         Ok(Some(Library {
             library_name: library["name"].as_str().context("bad json: couldn't parse library name")?.to_string(),
             specific_os: system,
-            download_path: download_path,
-            download_url: download_url,
-            is_native: is_native,
+            download_path,
+            download_url,
+            is_native,
         }))
     }
 }
@@ -316,7 +316,7 @@ async fn get_manifest() -> anyhow::Result<&'static Manifest> {
 
                 versions.push(ManifestVersion {
                     version_id: version["id"].as_str().context("bad json: couldn't parse version id")?.to_string(),
-                    version_type: version_type,
+                    version_type,
                     details_url: version["url"]
                         .as_str()
                         .context("bad json: couldn't parse version download url")?
@@ -333,7 +333,7 @@ async fn get_manifest() -> anyhow::Result<&'static Manifest> {
                     .as_str()
                     .context("bad json: couldn't find latest snapshot")?
                     .to_string(),
-                versions: versions,
+                versions,
             })
         })
         .await?;
@@ -343,7 +343,7 @@ async fn get_manifest() -> anyhow::Result<&'static Manifest> {
 
 pub async fn get_versions() -> anyhow::Result<&'static [ManifestVersion]> {
     let manifest = get_manifest().await?;
-    return Ok(&manifest.versions);
+    Ok(&manifest.versions)
 }
 
 pub async fn get_version_data(version_id: String) -> anyhow::Result<VersionData> {
@@ -394,16 +394,16 @@ pub async fn get_version_data(version_id: String) -> anyhow::Result<VersionData>
             .as_str()
             .context("bad json: couldn't parse asset indexx mainclass")?
             .to_string(),
-        libraries: libraries,
+        libraries,
     })
 }
 
 fn extract_natives(jar_path: &PathBuf, natives_dir: &PathBuf) -> anyhow::Result<()> {
-    let file = std::fs::File::open(&jar_path)?;
+    let file = std::fs::File::open(jar_path)?;
     let mut archive = ZipArchive::new(file)?;
 
     if !natives_dir.exists() {
-        std::fs::create_dir_all(&natives_dir)?;
+        std::fs::create_dir_all(natives_dir)?;
     }
 
     for i in 0..archive.len() {
@@ -480,7 +480,7 @@ pub async fn install_minecraft(
         });
 
         if !library.is_native {
-            classpath_relative.push(full_download_path.clone().to_string_lossy().to_owned().to_string());
+            classpath_relative.push(full_download_path.to_string_lossy().into_owned());
         }
     }
 
@@ -536,7 +536,7 @@ pub async fn install_minecraft(
         version: version.version_id.clone(),
         asset_index_id: version.asset_index_id.clone(),
         client_jar_relative: client_jar_directory.strip_prefix(directory)?.to_string_lossy().into_owned(),
-        classpath_relative: classpath_relative,
+        classpath_relative,
     };
 
     let encoded_installation_metadata = serde_json::to_string(&installation_metadata)?;

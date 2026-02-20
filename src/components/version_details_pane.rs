@@ -6,7 +6,7 @@ use crate::globals::APP_STATE;
 pub fn VersionDetailsPane() -> Element {
     rsx! {
         div {
-            class: "w-2/3 flex flex-col bg-white/5 rounded-xl h-11/12 p-4",
+            class: "w-5/6 flex flex-col bg-white/5 rounded-xl h-full p-4",
             h1 {
                 class: "w-full text-center text-4xl font-bold",
                 {APP_STATE().persistent.selected_version}
