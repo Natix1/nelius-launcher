@@ -298,6 +298,7 @@ impl VersionData {
 async fn get_manifest() -> anyhow::Result<&'static Manifest> {
     MANIFEST
         .get_or_try_init(async || -> anyhow::Result<Manifest, anyhow::Error> {
+            println!("Fetching manifest");
             let response: Value = get_reqwest_client().get(MANIFEST_URL.to_string()).send().await?.json().await?;
 
             let raw_versions =

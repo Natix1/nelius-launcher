@@ -1,2 +1,3 @@
-pub mod setup_box;
-pub mod version_config;
+pub mod version_details_pane;
+pub mod version_list_item;
+pub mod version_list_sidebar;

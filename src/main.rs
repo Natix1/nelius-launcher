@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 
 use crate::{
-    components::{setup_box::SetupBox, version_config::VersionConfig},
+    components::{version_details_pane::VersionDetailsPane, version_list_sidebar::VersionListSidebar},
     globals::APP_STATE,
 };
 
@@ -56,11 +56,9 @@ fn App() -> Element {
         document::Link { rel: "stylesheet", href: DIOXUS_COMPONENTS_CSS }
 
         div {
-            class: "rounded-3xl flex flex-col items-center space-y-6",
-            SetupBox {
-                section_title: "GAME VERSION".to_string(),
-                VersionConfig {}
-            }
+            class: "rounded-3xl flex flex-row items-center w-full h-screen space-x-6 items-center pr-5 pl-5",
+            VersionListSidebar {  }
+            VersionDetailsPane {  }
         }
     }
 }
