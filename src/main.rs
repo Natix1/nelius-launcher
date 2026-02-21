@@ -17,13 +17,6 @@ const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 const DIOXUS_COMPONENTS_CSS: Asset = asset!("/assets/dx-components-theme.css");
 
 fn main() {
-    // So we don't get a big bulky title bar. Makes the app feel more native which is what I'm going for
-    #[cfg(target_os = "linux")]
-    {
-        std::env::set_var("GDK_BACKEND", "x11");
-        std::env::set_var("GTK_CSD", "0");
-    }
-
     let config = dioxus::desktop::Config::new()
         .with_window(
             dioxus::desktop::WindowBuilder::new()

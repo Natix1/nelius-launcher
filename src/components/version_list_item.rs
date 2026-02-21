@@ -6,11 +6,11 @@ use crate::globals::APP_STATE;
 fn BaseVersionListItem(text: String, onclick: EventHandler<Event<MouseData>>, selected: ReadSignal<bool>) -> Element {
     rsx! {
         li {
-            class: "cursor-pointer transition-colors w-full rounded-lg",
+            class: "cursor-pointer transition-transform w-full rounded-sm bg-white/10 hover:bg-white/20 ring-1 ring-white/15",
             id: if selected() { "selected-item" } else { "" },
             onclick: move |e| onclick.call(e),
             div {
-                class: "flex flex-row gap-5 items-center p-2",
+                class: "flex flex-row gap-5 items-center p-1",
                 p {
                     class: "text-center w-full",
                     "{text}"

@@ -22,5 +22,6 @@ option {
 }
 
 #selected-item {
-    color: lime;
+    color: #202326;
+    background-color: #DBDBDB;
 }
