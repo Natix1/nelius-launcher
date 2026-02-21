@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 #[component]
-pub fn GameLogsBox(logs: ReadSignal<String>, onlogsclear: EventHandler<MouseEvent>) -> Element {
+pub fn GameLogsBox() -> Element {
     rsx! {
         div {
             class: "w-full flex justify-center h-full",
@@ -11,7 +11,6 @@ pub fn GameLogsBox(logs: ReadSignal<String>, onlogsclear: EventHandler<MouseEven
                     class: "flex-1 overflow-y-auto p-4 custom-scrollbar",
                     p {
                         class: "whitespace-pre-wrap break-words w-full h-full",
-                        {logs}
                     }
                 }
             }

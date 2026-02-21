@@ -14,7 +14,6 @@ use tokio::{
 use zip::ZipArchive;
 
 use crate::launcher::{self, requests::reqwest_global_client::get_reqwest_client};
-pub type Logger = std::sync::Arc<dyn Fn(String) + Send + Sync + 'static>;
 
 const METADATA_FILENAME: &str = "nelius_metadata.lock";
 const CONCURRENT_DOWNLOADS_LIMIT: usize = 32;
@@ -105,21 +104,9 @@ impl GameInstance {
         fs::try_exists(lock_file).await.unwrap_or(false)
     }
 
-    pub async fn ensure_installed(&mut self, logger: Logger) -> anyhow::Result<()> {
-        let lock_file = self.directory.join(METADATA_FILENAME);
-        if !fs::try_exists(&lock_file).await.unwrap_or(false) {
-            fs::create_dir_all(&self.directory).await?;
-            let data = launcher::downloader::get_version_data(self.version_id.clone()).await?;
-            launcher::downloader::install_minecraft(&data, &self.directory, logger).await?;
-        }
+    pub async fn ensure_installed(&mut self) -> anyhow::Result<()> {}
 
-        let contents = fs::read(&lock_file).await?;
-        self.metadata = Some(serde_json::from_slice(&contents)?);
-
-        Ok(())
-    }
-
-    pub async fn run(&self, java_binary: &str, logger: Logger) -> anyhow::Result<()> {
+    pub async fn run(&self, java_binary: &str) -> anyhow::Result<()> {
         let meta = self.metadata.as_ref().context("No metadata available")?;
         let mut cmd = meta.create_launch_command(&self.directory, java_binary);
 
@@ -135,7 +122,7 @@ impl GameInstance {
                 result = stdout.next_line() => {
                     match result {
                         Ok(Some(line)) => {
-                            logger(line);
+                            //log(line);
                         },
                         Ok(None) => break,
                         Err(e) => {
@@ -148,7 +135,7 @@ impl GameInstance {
                 result = stderr.next_line() => {
                     match result {
                         Ok(Some(line)) => {
-                            logger(line);
+                            //log(line);
                         },
                         Ok(None) => break,
                         Err(e) => {
@@ -432,11 +419,7 @@ struct ToDownload {
     is_native: bool,
 }
 
-pub async fn install_minecraft(
-    version: &VersionData,
-    directory: &PathBuf,
-    logger: Logger,
-) -> anyhow::Result<(), anyhow::Error> {
+pub async fn install_minecraft(version: &VersionData, directory: &PathBuf) -> anyhow::Result<(), anyhow::Error> {
     fs::create_dir_all(directory.as_path()).await?;
 
     let mut classpath_relative: Vec<String> = Vec::with_capacity(256);
@@ -498,15 +481,14 @@ pub async fn install_minecraft(
     let results: Vec<anyhow::Result<()>> = futures::stream::iter(files_to_download)
         .map(|task| {
             let client = get_reqwest_client();
-            let logger = logger.clone();
             let natives_directory = natives_directory.clone();
 
             async move {
-                logger(format!(
-                    "Downloading {} to {}...",
-                    task.download_uri,
-                    task.download_path.to_str().context("invalid download path in task")?
-                ));
+                // log(format!(
+                //     "Downloading {} to {}...",
+                //     task.download_uri,
+                //     task.download_path.to_str().context("invalid download path in task")?
+                // ));
                 let parent_path = task.download_path.parent().context("failed getting parent path")?;
                 fs::create_dir_all(parent_path).await?;
                 let response = client.get(&task.download_uri).send().await?;
@@ -514,7 +496,7 @@ pub async fn install_minecraft(
                 fs::write(&task.download_path, bytes).await?;
 
                 if task.is_native {
-                    logger(format!("Extracting {} to {}...", task.download_uri, natives_directory.display()));
+                    //log(format!("Extracting {} to {}...", task.download_uri, natives_directory.display()));
                     tokio::task::spawn_blocking(move || extract_natives(&task.download_path, &natives_directory))
                         .await?
                         .context("failed extracting natives")?;

@@ -48,7 +48,7 @@ pub fn NeliusButton(
                     }
                 }
                 p {
-                    class: "font-bold",
+                    class: "",
                     {text}
                 }
             }

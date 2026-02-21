@@ -4,13 +4,13 @@ use dioxus::prelude::*;
 
 use crate::{
     components::{version_details_pane::VersionDetailsPane, version_list_sidebar::VersionListSidebar},
-    globals::APP_STATE,
+    profiles::store::ProfileStore,
 };
 
 mod components;
-mod globals;
 mod launcher;
-mod state;
+mod profiles;
+mod reqwest_client;
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
@@ -31,17 +31,7 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    use_effect(move || {
-        let data = APP_STATE.read().clone();
-        spawn(async move {
-            match data.persistent.save().await {
-                Ok(_) => {
-                    println!("Persistent state saved")
-                }
-                Err(e) => eprintln!("Auto-save failed: {e}"),
-            }
-        });
-    });
+    use_context_provider(|| ProfileStore::new());
 
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }

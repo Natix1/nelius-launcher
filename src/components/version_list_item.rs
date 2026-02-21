@@ -1,7 +1,5 @@
 use dioxus::prelude::*;
 
-use crate::globals::APP_STATE;
-
 #[component]
 fn BaseVersionListItem(text: String, onclick: EventHandler<Event<MouseData>>, selected: ReadSignal<bool>) -> Element {
     rsx! {
@@ -22,16 +20,11 @@ fn BaseVersionListItem(text: String, onclick: EventHandler<Event<MouseData>>, se
 
 #[component]
 pub fn VersionListItem(version_id: String) -> Element {
-    let id_for_memo = version_id.clone();
-    let is_selected = use_memo(move || APP_STATE().persistent.selected_version.as_ref() == Some(&id_for_memo));
-
     rsx! {
         BaseVersionListItem {
             text: "{version_id}",
-            onclick: move |_| {
-                APP_STATE.write().persistent.selected_version = Some(version_id.clone());
-            },
-            selected: is_selected,
+            onclick: move |_| {},
+            selected: false,
         }
     }
 }
