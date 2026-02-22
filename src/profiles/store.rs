@@ -5,20 +5,24 @@ use std::{collections::HashMap, fs};
 
 use crate::{launcher::directories, profiles::Profile};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ProfileStore {
+    pub selected_profile_name: Signal<Option<String>>,
     pub profiles: Signal<HashMap<String, Signal<Profile>>>,
 }
 
 impl Default for ProfileStore {
     fn default() -> Self {
-        ProfileStore { profiles: Signal::new(HashMap::new()) }
+        ProfileStore {
+            profiles: Signal::new_in_scope(HashMap::new(), ScopeId::ROOT),
+            selected_profile_name: Signal::new_in_scope(None, ScopeId::ROOT),
+        }
     }
 }
 
 impl ProfileStore {
     pub fn load() -> Self {
-        let config_path = directories::get_config_dir();
+        let config_path = &directories::get_directories().config_file;
         let contents = match fs::read(config_path) {
             Ok(v) => v,
             Err(_) => {
@@ -39,16 +43,16 @@ impl ProfileStore {
 
         for (name, data) in profiles_object {
             match serde_json::from_value::<Profile>(data.clone()) {
-                Ok(profile) => profiles.insert(name.to_owned(), Signal::new(profile)),
+                Ok(profile) => profiles.insert(name.to_owned(), Signal::new_in_scope(profile, ScopeId::ROOT)),
                 Err(_) => return Self::default(),
             };
         }
 
-        ProfileStore { profiles: Signal::new(profiles) }
+        ProfileStore { profiles: Signal::new_in_scope(profiles, ScopeId::ROOT), ..Default::default() }
     }
 
     pub fn peek(&self, profile_name: String) -> Option<Signal<Profile>> {
-        self.profiles.read().get(&profile_name).copied()
+        self.profiles.peek().get(&profile_name).copied()
     }
 
     pub fn write(&self, profile_name: String, mutate: impl FnOnce(&mut Profile)) {
@@ -64,15 +68,18 @@ impl ProfileStore {
     }
 
     pub fn add(&mut self, profile: Profile) -> anyhow::Result<()> {
-        if self.profiles.read().contains_key(&profile.profile_name) {
-            bail!("A profile with the name of \"{}\" already exists.", profile.profile_name)
-        }
-
-        self.profiles.write().insert(profile.profile_name.clone(), Signal::new(profile));
+        self.profiles.write().insert(profile.profile_name.clone(), Signal::new_in_scope(profile, ScopeId::ROOT));
         Ok(())
     }
 
     pub fn remove(&mut self, profile_name: String) -> anyhow::Result<()> {
+        let selected = self.selected_profile_name.peek().to_owned();
+        if let Some(selected) = selected {
+            if selected == profile_name {
+                self.selected_profile_name.set(None);
+            }
+        }
+
         if let Some(_) = self.profiles.write().remove(&profile_name) {
             Ok(())
         } else {

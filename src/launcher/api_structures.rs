@@ -18,15 +18,6 @@ pub enum MinecraftCompatibleOS {
     Windows,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct InstallationMetadata {
-    pub main_class: String,
-    pub version: String,
-    pub asset_index_id: String,
-    pub client_jar_relative: String,
-    pub classpath_relative: Vec<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Manifest {
     pub latest_release: String,

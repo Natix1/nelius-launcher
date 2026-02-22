@@ -1,124 +1,22 @@
+use std::path::{Path, PathBuf};
+
 use anyhow::Context;
+use futures::StreamExt;
 use serde_json::Value;
-use tokio::sync::OnceCell;
+use tokio::{fs, io::AsyncWriteExt, sync::OnceCell};
+use zip::ZipArchive;
 
-use crate::{launcher::api_structures::*, reqwest_client::REQWEST_CLIENT};
+use crate::{
+    launcher::{api_structures::*, directories, logging::log},
+    profiles::ProfileInstallationData,
+    reqwest_client::REQWEST_CLIENT,
+};
 
-const METADATA_FILENAME: &str = "nelius_metadata.lock";
 const CONCURRENT_DOWNLOADS_LIMIT: usize = 32;
 const MANIFEST_URL: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const RESOURCES_BASE_URL: &str = "https://resources.download.minecraft.net";
 
 static MANIFEST: OnceCell<Manifest> = OnceCell::const_new();
-
-// impl InstallationMetadata {
-//     pub fn create_launch_command(&self, game_dir: &PathBuf, java_binary: &str) -> Command {
-//         let mut cmd = Command::new(java_binary);
-//         let mut classpath_entries: Vec<String> = self
-//             .classpath_relative
-//             .iter()
-//             .map(|relative| game_dir.join(relative).to_string_lossy().into_owned())
-//             .collect();
-
-//         classpath_entries.push(game_dir.join(&self.client_jar_relative).to_string_lossy().into_owned());
-
-//         let natives_dir = game_dir.join("natives");
-//         let seperator = if std::env::consts::OS == "windows" { ";" } else { ":" };
-//         let classpath = classpath_entries.join(seperator);
-
-//         cmd.current_dir(game_dir)
-//             .arg(format!("-Djava.library.path={}", natives_dir.display()))
-//             .arg("-Xmx4G")
-//             .arg("-cp")
-//             .arg(classpath)
-//             .arg(&self.main_class)
-//             .arg("--username")
-//             .arg("Nelius")
-//             .arg("--version")
-//             .arg(&self.version)
-//             .arg("--gameDir")
-//             .arg(game_dir)
-//             .arg("-assetsDir")
-//             .arg(game_dir.join("assets"))
-//             .arg("--assetIndex")
-//             .arg(&self.asset_index_id)
-//             .arg("--uuid")
-//             .arg("0")
-//             .arg("--accessToken")
-//             .arg("0")
-//             .stdout(Stdio::piped())
-//             .stderr(Stdio::piped());
-
-//         cmd
-//     }
-// }
-
-// pub struct GameInstance {
-//     pub version_id: String,
-//     pub directory: PathBuf,
-//     pub metadata: Option<InstallationMetadata>,
-// }
-
-// impl GameInstance {
-//     pub fn new(version_id: String) -> Self {
-//         GameInstance { version_id, directory: dir, metadata: None }
-//     }
-
-//     pub async fn is_installed(&self) -> bool {
-//         let lock_file = self.directory.join(METADATA_FILENAME);
-
-//         fs::try_exists(lock_file).await.unwrap_or(false)
-//     }
-
-//     pub async fn ensure_installed(&mut self) -> anyhow::Result<()> {}
-
-//     pub async fn run(&self, java_binary: &str) -> anyhow::Result<()> {
-//         let meta = self.metadata.as_ref().context("No metadata available")?;
-//         let mut cmd = meta.create_launch_command(&self.directory, java_binary);
-
-//         let mut child = cmd.spawn()?;
-//         let stdout = child.stdout.take().context("failed taking stdout from child")?;
-//         let stderr = child.stderr.take().context("failed taking stderr from child")?;
-
-//         let mut stdout = BufReader::new(stdout).lines();
-//         let mut stderr = BufReader::new(stderr).lines();
-
-//         loop {
-//             select! {
-//                 result = stdout.next_line() => {
-//                     match result {
-//                         Ok(Some(line)) => {
-//                             //log(line);
-//                         },
-//                         Ok(None) => break,
-//                         Err(e) => {
-//                             eprintln!("Failed reading stdout: {}", e);
-//                             break;
-//                         }
-//                     };
-//                 }
-
-//                 result = stderr.next_line() => {
-//                     match result {
-//                         Ok(Some(line)) => {
-//                             //log(line);
-//                         },
-//                         Ok(None) => break,
-//                         Err(e) => {
-//                             eprintln!("Failed reading stderr: {}", e);
-//                         }
-//                     };
-//                 }
-
-//                 _ = child.wait() => {
-//                     break;
-//                 }
-//             }
-//         }
-
-//         Ok(())
-//     }
-// }
 
 async fn get_manifest() -> anyhow::Result<&'static Manifest> {
     MANIFEST
@@ -171,197 +69,197 @@ pub async fn get_versions() -> anyhow::Result<&'static [ManifestVersion]> {
     Ok(&manifest.versions)
 }
 
-// pub async fn get_version_data(version_id: String) -> anyhow::Result<VersionData> {
-//     let manifest = get_manifest().await?;
-//     let target = manifest
-//         .versions
-//         .iter()
-//         .find(|version| version.version_id.to_lowercase().trim() == version_id.to_lowercase().trim());
+pub async fn get_version_data(version_id: &String) -> anyhow::Result<VersionData> {
+    let manifest = get_manifest().await?;
+    let target = manifest
+        .versions
+        .iter()
+        .find(|version| version.version_id.to_lowercase().trim() == version_id.to_lowercase().trim());
 
-//     let Some(target) = target else {
-//         anyhow::bail!("The version {} does not exist", version_id);
-//     };
+    let Some(target) = target else {
+        anyhow::bail!("The version {} does not exist", version_id);
+    };
 
-//     let response: Value = get_reqwest_client()
-//         .get(&target.details_url)
-//         .send()
-//         .await
-//         .context("network error")?
-//         .json()
-//         .await
-//         .context("bad json: couldn't parse details response into json")?;
+    let response: Value = REQWEST_CLIENT
+        .get(&target.details_url)
+        .send()
+        .await
+        .context("network error")?
+        .json()
+        .await
+        .context("bad json: couldn't parse details response into json")?;
 
-//     let raw_libraries = response["libraries"].as_array().context("bad json: couldn't parse libraries into json")?;
-//     let mut libraries = Vec::with_capacity(raw_libraries.len());
+    let raw_libraries = response["libraries"].as_array().context("bad json: couldn't parse libraries into json")?;
+    let mut libraries = Vec::with_capacity(raw_libraries.len());
 
-//     for raw_library in raw_libraries {
-//         let library = Library::from_json(raw_library)?;
-//         if let Some(library) = library {
-//             libraries.push(library);
-//         }
-//     }
+    for raw_library in raw_libraries {
+        let library = Library::from_json(raw_library)?;
+        if let Some(library) = library {
+            libraries.push(library);
+        }
+    }
 
-//     Ok(VersionData {
-//         version_id: response["id"].as_str().context("bad json: couldnt't parse version id")?.to_string(),
-//         asset_index_download_url: response["assetIndex"]["url"]
-//             .as_str()
-//             .context("bad json: couldn't parse asset index download url")?
-//             .to_string(),
-//         asset_index_id: response["assetIndex"]["id"]
-//             .as_str()
-//             .context("bad json: couldn't parse asset index id")?
-//             .to_string(),
-//         client_jar_download_url: response["downloads"]["client"]["url"]
-//             .as_str()
-//             .context("bad json: couldn't parse asset index client download url")?
-//             .to_string(),
-//         main_class: response["mainClass"]
-//             .as_str()
-//             .context("bad json: couldn't parse asset indexx mainclass")?
-//             .to_string(),
-//         libraries,
-//     })
-// }
+    Ok(VersionData {
+        version_id: response["id"].as_str().context("bad json: couldnt't parse version id")?.to_string(),
+        asset_index_download_url: response["assetIndex"]["url"]
+            .as_str()
+            .context("bad json: couldn't parse asset index download url")?
+            .to_string(),
+        asset_index_id: response["assetIndex"]["id"]
+            .as_str()
+            .context("bad json: couldn't parse asset index id")?
+            .to_string(),
+        client_jar_download_url: response["downloads"]["client"]["url"]
+            .as_str()
+            .context("bad json: couldn't parse asset index client download url")?
+            .to_string(),
+        main_class: response["mainClass"]
+            .as_str()
+            .context("bad json: couldn't parse asset indexx mainclass")?
+            .to_string(),
+        libraries,
+    })
+}
 
-// fn extract_natives(jar_path: &PathBuf, natives_dir: &PathBuf) -> anyhow::Result<()> {
-//     let file = std::fs::File::open(jar_path)?;
-//     let mut archive = ZipArchive::new(file)?;
+fn extract_natives(jar_path: PathBuf, natives_dir: &Path) -> anyhow::Result<()> {
+    let file = std::fs::File::open(jar_path)?;
+    let mut archive = ZipArchive::new(file)?;
 
-//     if !natives_dir.exists() {
-//         std::fs::create_dir_all(natives_dir)?;
-//     }
+    if !natives_dir.exists() {
+        std::fs::create_dir_all(natives_dir)?;
+    }
 
-//     for i in 0..archive.len() {
-//         let mut file = archive.by_index(i)?;
-//         let name = file.name();
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let name = file.name();
 
-//         if file.is_dir() {
-//             continue;
-//         }
+        if file.is_dir() {
+            continue;
+        }
 
-//         if !(name.ends_with(".dll") || name.ends_with(".so") || name.ends_with(".dylib")) {
-//             continue;
-//         }
+        if !(name.ends_with(".dll") || name.ends_with(".so") || name.ends_with(".dylib")) {
+            continue;
+        }
 
-//         let out_path = natives_dir.join(name);
-//         let mut out_file = std::fs::File::create(&out_path)?;
-//         std::io::copy(&mut file, &mut out_file)?;
-//     }
+        let out_path = natives_dir.join(name);
+        let mut out_file = std::fs::File::create(&out_path)?;
+        std::io::copy(&mut file, &mut out_file)?;
+    }
 
-//     Ok(())
-// }
+    Ok(())
+}
 
-// struct ToDownload {
-//     download_uri: String,
-//     download_path: PathBuf,
-//     is_native: bool,
-// }
+struct ToDownload {
+    download_uri: String,
+    download_path: PathBuf,
+    is_native: bool,
+}
 
-// pub async fn install_minecraft(version: &VersionData, directory: &PathBuf) -> anyhow::Result<(), anyhow::Error> {
-//     fs::create_dir_all(directory.as_path()).await?;
+pub async fn install_minecraft(
+    version: &VersionData,
+    profile_directory: &PathBuf,
+) -> anyhow::Result<ProfileInstallationData, anyhow::Error> {
+    fs::create_dir_all(profile_directory.as_path()).await?;
 
-//     let mut classpath_relative: Vec<String> = Vec::with_capacity(256);
+    let mut classpath_relative: Vec<String> = Vec::with_capacity(256);
+    let directories = directories::get_directories();
 
-//     let client_jar_directory =
-//         directory.join("versions").join(&version.version_id).join(format!("{}.jar", &version.version_id));
-//     let libraries_directory = directory.join("libraries");
-//     let assets_directory = directory.join("assets");
+    let client_jar_directory =
+        directories.versions.join("versions").join(&version.version_id).join(format!("{}.jar", &version.version_id));
+    let asset_index_path = directories.indexes.join(format!("{}.json", &version.asset_index_id));
 
-//     let objects_directory = assets_directory.join("objects");
-//     let indexes_directory = assets_directory.join("indexes");
-//     let natives_directory = directory.join("natives");
-//     let mut asset_index_path = indexes_directory.join(&version.asset_index_id);
-//     asset_index_path.set_extension("json");
+    fs::create_dir_all(&directories.libraries).await?;
+    fs::create_dir_all(&directories.objects).await?;
+    fs::create_dir_all(&directories.indexes).await?;
+    fs::create_dir_all(client_jar_directory.parent().context("failed constructing client.jar directory")?).await?;
+    fs::create_dir_all(&directories.natives).await?;
 
-//     fs::create_dir_all(&libraries_directory).await?;
-//     fs::create_dir_all(&objects_directory).await?;
-//     fs::create_dir_all(&indexes_directory).await?;
-//     fs::create_dir_all(client_jar_directory.parent().context("failed constructing client.jar directory")?).await?;
-//     fs::create_dir_all(&natives_directory).await?;
+    let libraries = version.get_os_required_libraries();
+    let asset_index = REQWEST_CLIENT.get(&version.asset_index_download_url).send().await?.bytes().await?.to_vec();
 
-//     let libraries = version.get_os_required_libraries();
-//     let asset_index = get_reqwest_client().get(&version.asset_index_download_url).send().await?.bytes().await?.to_vec();
+    let mut file = fs::File::create(asset_index_path).await?;
+    file.write_all(&asset_index).await?;
 
-//     let mut file = fs::File::create(asset_index_path).await?;
-//     file.write_all(&asset_index).await?;
+    let mut files_to_download: Vec<ToDownload> = Vec::with_capacity(1024);
+    files_to_download.push(ToDownload {
+        download_uri: version.client_jar_download_url.clone(),
+        download_path: client_jar_directory.to_owned(),
+        is_native: false,
+    });
 
-//     let mut files_to_download: Vec<ToDownload> = Vec::with_capacity(1024);
-//     files_to_download.push(ToDownload {
-//         download_uri: version.client_jar_download_url.clone(),
-//         download_path: client_jar_directory.clone(),
-//         is_native: false,
-//     });
+    for library in libraries {
+        let full_download_path = directories.libraries.join(&library.download_path);
+        files_to_download.push(ToDownload {
+            download_uri: library.download_url.clone(),
+            download_path: full_download_path.to_owned(),
+            is_native: library.is_native,
+        });
 
-//     for library in libraries {
-//         let full_download_path = libraries_directory.join(&library.download_path);
-//         files_to_download.push(ToDownload {
-//             download_uri: library.download_url.clone(),
-//             download_path: full_download_path.clone(),
-//             is_native: library.is_native,
-//         });
+        if !library.is_native {
+            classpath_relative.push(full_download_path.to_string_lossy().into_owned());
+        }
+    }
 
-//         if !library.is_native {
-//             classpath_relative.push(full_download_path.to_string_lossy().into_owned());
-//         }
-//     }
+    let decoded_asset_index: Value = serde_json::from_slice(&asset_index)?;
+    let asset_index_objects = decoded_asset_index["objects"].as_object().context("bad json: couldn't parse objects")?;
+    for (_, object_data) in asset_index_objects {
+        let hash = object_data["hash"].as_str().context("bad json: couldn't parse hash")?;
+        let hash_first_two = hash[0..2].to_string();
+        let uri = format!("{}/{}/{}", RESOURCES_BASE_URL, hash_first_two, hash);
+        let path = directories.objects.join(hash_first_two).join(hash);
 
-//     let decoded_asset_index: Value = serde_json::from_slice(&asset_index)?;
-//     let asset_index_objects = decoded_asset_index["objects"].as_object().context("bad json: couldn't parse objects")?;
-//     for (_, object_data) in asset_index_objects {
-//         let hash = object_data["hash"].as_str().context("bad json: couldn't parse hash")?;
-//         let hash_first_two = hash[0..2].to_string();
-//         let uri = format!("{}/{}/{}", RESOURCES_BASE_URL, hash_first_two, hash);
-//         let path = objects_directory.join(hash_first_two).join(hash);
+        files_to_download.push(ToDownload { download_uri: uri, download_path: path.to_owned(), is_native: false });
+    }
 
-//         files_to_download.push(ToDownload { download_uri: uri, download_path: path, is_native: false });
-//     }
+    let results: Vec<anyhow::Result<()>> = futures::stream::iter(files_to_download)
+        .map(|task| {
+            let natives_directory = directories.natives.clone();
 
-//     let results: Vec<anyhow::Result<()>> = futures::stream::iter(files_to_download)
-//         .map(|task| {
-//             let client = LazyLock::force(&REQWEST_CLIENT);
-//             let natives_directory = natives_directory.clone();
+            async move {
+                if fs::try_exists(&task.download_path).await? {
+                    // it already exists so we don't download it again
+                    return Ok(());
+                }
 
-//             async move {
-//                 // log(format!(
-//                 //     "Downloading {} to {}...",
-//                 //     task.download_uri,
-//                 //     task.download_path.to_str().context("invalid download path in task")?
-//                 // ));
-//                 let parent_path = task.download_path.parent().context("failed getting parent path")?;
-//                 fs::create_dir_all(parent_path).await?;
-//                 let response = client.get(&task.download_uri).send().await?;
-//                 let bytes = response.bytes().await?;
-//                 fs::write(&task.download_path, bytes).await?;
+                log(format!(
+                    "Downloading {} to {}...",
+                    task.download_uri,
+                    task.download_path.to_str().context("invalid download path in task")?
+                ));
 
-//                 if task.is_native {
-//                     //log(format!("Extracting {} to {}...", task.download_uri, natives_directory.display()));
-//                     tokio::task::spawn_blocking(move || extract_natives(&task.download_path, &natives_directory))
-//                         .await?
-//                         .context("failed extracting natives")?;
-//                 }
+                let parent_path = task.download_path.parent().context("failed getting parent path")?;
+                fs::create_dir_all(parent_path).await?;
+                let response = REQWEST_CLIENT.get(&task.download_uri).send().await?;
+                let bytes = response.bytes().await?;
+                fs::write(&task.download_path, bytes).await?;
 
-//                 Ok(())
-//             }
-//         })
-//         .buffer_unordered(CONCURRENT_DOWNLOADS_LIMIT)
-//         .collect::<Vec<_>>()
-//         .await;
+                if task.is_native {
+                    log(format!("Extracting {} to {}...", task.download_uri, natives_directory.display()));
+                    tokio::task::spawn_blocking(move || extract_natives(task.download_path, &natives_directory))
+                        .await?
+                        .context("failed extracting natives")?;
+                }
 
-//     for res in results {
-//         res?;
-//     }
+                Ok(())
+            }
+        })
+        .buffer_unordered(CONCURRENT_DOWNLOADS_LIMIT)
+        .collect::<Vec<_>>()
+        .await;
 
-//     let installation_metadata = InstallationMetadata {
-//         main_class: version.main_class.clone(),
-//         version: version.version_id.clone(),
-//         asset_index_id: version.asset_index_id.clone(),
-//         client_jar_relative: client_jar_directory.strip_prefix(directory)?.to_string_lossy().into_owned(),
-//         classpath_relative,
-//     };
+    for res in results {
+        res?;
+    }
 
-//     let encoded_installation_metadata = serde_json::to_string(&installation_metadata)?;
-//     let mut file = fs::File::create(directory.join(METADATA_FILENAME)).await?;
-//     file.write_all(encoded_installation_metadata.as_bytes()).await?;
+    let installation_metadata = ProfileInstallationData {
+        main_class: version.main_class.clone(),
+        asset_index_id: version.asset_index_id.clone(),
+        client_jar_relative: client_jar_directory
+            .strip_prefix(&directories.minecraft_root)?
+            .to_string_lossy()
+            .into_owned(),
+        classpath_relative,
+    };
 
-//     Ok(())
-// }
+    Ok(installation_metadata)
+}

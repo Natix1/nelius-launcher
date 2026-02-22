@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 
+use crate::launcher::logging::LAUNCHER_LOGS;
+
 #[component]
 pub fn ProfileLogsBox() -> Element {
     rsx! {
@@ -11,6 +13,7 @@ pub fn ProfileLogsBox() -> Element {
                     class: "flex-1 overflow-y-auto p-4 custom-scrollbar",
                     p {
                         class: "whitespace-pre-wrap break-words w-full h-full",
+                        {LAUNCHER_LOGS()}
                     }
                 }
             }

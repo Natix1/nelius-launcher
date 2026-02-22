@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 
+use crate::profiles::store::ProfileStore;
+
 #[component]
 fn BaseProfileListItem(text: String, onclick: EventHandler<Event<MouseData>>, selected: ReadSignal<bool>) -> Element {
     rsx! {
@@ -19,12 +21,18 @@ fn BaseProfileListItem(text: String, onclick: EventHandler<Event<MouseData>>, se
 }
 
 #[component]
-pub fn ProfileListItem(version_id: String) -> Element {
+pub fn ProfileListItem(profile_name: ReadSignal<String>) -> Element {
+    let mut profile_store = use_context::<ProfileStore>();
+    let is_selected =
+        use_memo(move || profile_store.selected_profile_name.read().as_deref() == Some(profile_name.read().as_str()));
+
     rsx! {
         BaseProfileListItem {
-            text: "{version_id}",
-            onclick: move |_| {},
-            selected: false,
+            text: "{profile_name}",
+            onclick: move |_| {
+                profile_store.selected_profile_name.set(Some(profile_name.read().to_owned()));
+            },
+            selected: is_selected,
         }
     }
 }

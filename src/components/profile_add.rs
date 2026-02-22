@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 
 use crate::{
     components::nelius_button::{NeliusButton, NeliusButtonStyle},
-    launcher::{self, downloader},
-    profiles::store::ProfileStore,
+    launcher::{self},
+    profiles::{Profile, store::ProfileStore},
 };
 
 const DONE_ASSET: Asset = asset!("assets/graphical/done.svg");
@@ -23,7 +23,7 @@ fn validate_profile_name(name: String, profiles: &ProfileStore) -> bool {
 }
 
 #[component]
-fn ProfileNameInput(name: Signal<String>) -> Element {
+fn ProfileNameInput(profile_name: Signal<String>) -> Element {
     let store = use_context::<ProfileStore>();
 
     rsx! {
@@ -33,13 +33,13 @@ fn ProfileNameInput(name: Signal<String>) -> Element {
                 class: "w-1/2 text-center ring-1 ring-white/15 rounded-sm p-1",
                 r#type: "text",
                 placeholder: "Give it a cool name",
-                value: name(),
+                value: profile_name(),
                 oninput: move |e| {
-                    name.set(e.value());
+                    profile_name.set(e.value());
                 }
             }
             {
-                if validate_profile_name(name(), &store) {
+                if validate_profile_name(profile_name(), &store) {
                     rsx! {
                         p {
                             class: "text-green-600 text-md opacity-75",
@@ -88,20 +88,21 @@ fn ProfileGameVersionDropdownOption(value: String, #[props(default = false)] dis
 }
 
 #[component]
-fn ProfileGameVersionDropdown(game_version: Signal<String>) -> Element {
+fn ProfileGameVersionDropdown(version_id: Signal<String>) -> Element {
     let versions = use_resource(|| async { launcher::downloader::get_versions().await });
 
     rsx! {
         select {
             class: "w-1/2 bg-black text-white rounded-lg",
             onchange: move |evt| {
-                game_version.set(evt.value());
+                version_id.set(evt.value());
             },
 
             match &*versions.read() {
                 Some(Ok(list)) => {
                     rsx! {
-                        ProfileGameVersionDropdownOption { disabled: true, value: "Select a version..." }
+                        ProfileGameVersionDropdownOption { value: "No version selected", disabled: { version_id() != "" } }
+
                         for v in list {
                             ProfileGameVersionDropdownOption { value: v.version_id.clone() }
                         }
@@ -119,7 +120,7 @@ fn ProfileGameVersionDropdown(game_version: Signal<String>) -> Element {
 }
 
 #[component]
-pub fn JavaBinarySelector(java_binary: Signal<String>) -> Element {
+pub fn JavaBinarySelector(java_binary_path: Signal<String>) -> Element {
     rsx! {
         div {
             class: "flex flex-1 flex-col justify-center items-center gap-3 bg-white/10 rounded-lg p-2 text-sm",
@@ -131,11 +132,11 @@ pub fn JavaBinarySelector(java_binary: Signal<String>) -> Element {
                         .await;
 
                     if let Some(path) = path {
-                        java_binary.set(path.path().to_string_lossy().to_string());
+                        java_binary_path.set(path.path().to_string_lossy().to_string());
                     }
                 },
                 {
-                    if java_binary() == "" {
+                    if java_binary_path() == "" {
                         rsx! {
                             p {
                                 "Select java binary"
@@ -144,7 +145,7 @@ pub fn JavaBinarySelector(java_binary: Signal<String>) -> Element {
                     } else {
                         rsx! {
                             p {
-                                "Java binary: {java_binary()}"
+                                "Java binary: {java_binary_path()}"
                             }
                         }
                     }
@@ -155,27 +156,31 @@ pub fn JavaBinarySelector(java_binary: Signal<String>) -> Element {
 }
 
 #[component]
-pub fn ProfileAdd() -> Element {
-    let store = use_context::<ProfileStore>();
-    let name = use_signal(|| String::new());
-    let game_version = use_signal(|| String::from(""));
-    let java_binary = use_signal(|| String::from(""));
+pub fn ProfileAdd(open: Signal<bool>) -> Element {
+    let mut profile_store = use_context::<ProfileStore>();
+    let profile_name = use_signal(|| String::new());
+    let version_id = use_signal(|| String::from(""));
+    let java_binary_path = use_signal(|| String::from(""));
 
     let all_valid = use_memo(move || {
-        if !validate_profile_name(name(), &store) {
+        if !validate_profile_name(profile_name(), &profile_store) {
             return false;
         }
 
-        if game_version() == "" {
+        if version_id() == "" {
             return false;
         }
 
-        if java_binary() == "" {
+        if java_binary_path() == "" {
             return false;
         }
 
         return true;
     });
+
+    if !open() {
+        return rsx! {div {}};
+    }
 
     rsx! {
         div {
@@ -192,8 +197,8 @@ pub fn ProfileAdd() -> Element {
                     id: "card",
 
                     ProfileNevermind {
-                        onclick: |_| {
-                            // TODO: Exit
+                        onclick: move |_| {
+                            open.set(false);
                         }
                     },
                     div {
@@ -207,9 +212,9 @@ pub fn ProfileAdd() -> Element {
                             class: "w-3/4 opacity-50 rounded-lg border-1"
                         }
 
-                        ProfileNameInput { name: name }
-                        ProfileGameVersionDropdown { game_version: game_version }
-                        JavaBinarySelector { java_binary: java_binary }
+                        ProfileNameInput { profile_name: profile_name }
+                        ProfileGameVersionDropdown { version_id: version_id }
+                        JavaBinarySelector { java_binary_path: java_binary_path }
 
                         div {
                             class: "w-1/2 h-1/6 flex items-center justify-center",
@@ -217,7 +222,16 @@ pub fn ProfileAdd() -> Element {
                                 text: "Submit",
                                 disabled: !all_valid(),
                                 icon: DONE_ASSET,
-                                onclick: |_| {},
+                                onclick: move |_| {
+                                    let profile = Profile {
+                                        profile_name: profile_name().to_owned(),
+                                        version_id: version_id().to_owned(),
+                                        java_binary_path: java_binary_path().to_owned()
+                                    };
+
+                                    let _ = profile_store.add(profile);
+                                    open.set(false);
+                                },
                                 style: NeliusButtonStyle::Safe
                             }
                         }
