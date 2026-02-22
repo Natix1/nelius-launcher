@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 #[component]
-pub fn GameLogsBox() -> Element {
+pub fn ProfileLogsBox() -> Element {
     rsx! {
         div {
             class: "w-full flex justify-center h-full",

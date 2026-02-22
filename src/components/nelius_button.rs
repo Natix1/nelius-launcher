@@ -38,14 +38,10 @@ pub fn NeliusButton(
             },
             disabled: disabled(),
             div {
-                class: "flex flex-row gap-1 justify-center items-center",
-                div {
-                    class: "w-1/4 p-1",
-                    img {
-                        class: "invert w-full h-full object-contain",
-                        src: icon,
-                        width: 30
-                    }
+                class: "p-3 flex flex-row gap-1 justify-center items-center",
+                img {
+                    src: icon,
+                    width: 30
                 }
                 p {
                     class: "",

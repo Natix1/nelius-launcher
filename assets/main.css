@@ -11,6 +11,10 @@ body,
     font-weight: 500;
 }
 
+#card {
+    background-color: #202326;
+}
+
 ul li {
     color: #DBDBDB
 }

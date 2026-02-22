@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 #[component]
-fn BaseVersionListItem(text: String, onclick: EventHandler<Event<MouseData>>, selected: ReadSignal<bool>) -> Element {
+fn BaseProfileListItem(text: String, onclick: EventHandler<Event<MouseData>>, selected: ReadSignal<bool>) -> Element {
     rsx! {
         li {
             class: "cursor-pointer transition-transform w-full rounded-sm bg-white/10 hover:bg-white/20 ring-1 ring-white/15",
@@ -19,9 +19,9 @@ fn BaseVersionListItem(text: String, onclick: EventHandler<Event<MouseData>>, se
 }
 
 #[component]
-pub fn VersionListItem(version_id: String) -> Element {
+pub fn ProfileListItem(version_id: String) -> Element {
     rsx! {
-        BaseVersionListItem {
+        BaseProfileListItem {
             text: "{version_id}",
             onclick: move |_| {},
             selected: false,
@@ -30,11 +30,11 @@ pub fn VersionListItem(version_id: String) -> Element {
 }
 
 #[component]
-pub fn VersionListFailed() -> Element {
+pub fn ProfileListFailed() -> Element {
     let is_selected = use_signal(|| false);
 
     rsx! {
-        BaseVersionListItem {
+        BaseProfileListItem {
             text: "Failed getting version data!",
             onclick: |_| {},
             selected: is_selected,

@@ -6,11 +6,12 @@ pub mod store;
 pub struct Profile {
     pub profile_name: String,
     pub version_id: String,
+    pub java_jar_path: String,
+
     pub asset_index_id: String,
     pub client_jar_relative: String,
     pub classpath_relative: String,
     pub main_class: String,
-    pub java_jar_path: String,
 }
 
 impl Profile {

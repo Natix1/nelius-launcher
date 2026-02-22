@@ -3,7 +3,9 @@
 use dioxus::prelude::*;
 
 use crate::{
-    components::{version_details_pane::VersionDetailsPane, version_list_sidebar::VersionListSidebar},
+    components::{
+        profile_add::ProfileAdd, profile_details_pane::ProfileDetailsPane, profile_list_sidebar::ProfileListSidebar,
+    },
     profiles::store::ProfileStore,
 };
 
@@ -31,7 +33,8 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    use_context_provider(|| ProfileStore::new());
+    let store = ProfileStore::load();
+    use_context_provider(move || store);
 
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
@@ -40,8 +43,9 @@ fn App() -> Element {
 
         div {
             class: "rounded-3xl flex flex-row items-center w-full h-screen space-x-3 items-center pr-3 pl-3 pb-3 pt-3",
-            VersionListSidebar {  }
-            VersionDetailsPane {  }
+            ProfileAdd {  },
+            ProfileListSidebar {  }
+            ProfileDetailsPane {  }
         }
     }
 }

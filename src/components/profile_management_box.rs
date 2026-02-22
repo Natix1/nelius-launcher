@@ -7,7 +7,7 @@ const KILL_ASSET: Asset = asset!("/assets/graphical/kill.svg");
 const UNINSTALL_ASSET: Asset = asset!("/assets/graphical/uninstall.svg");
 
 #[component]
-pub fn VersionManagementBox() -> Element {
+pub fn ProfileManagementBox() -> Element {
     rsx! {
         div {
             class: "w-full h-full flex justify-center",
