@@ -51,12 +51,12 @@ impl ProfileStore {
         ProfileStore { profiles: Signal::new_in_scope(profiles, ScopeId::ROOT), ..Default::default() }
     }
 
-    pub fn peek(&self, profile_name: String) -> Option<Signal<Profile>> {
-        self.profiles.peek().get(&profile_name).copied()
+    pub fn peek(&self, profile_name: &String) -> Option<Signal<Profile>> {
+        self.profiles.peek().get(profile_name).copied()
     }
 
-    pub fn write(&self, profile_name: String, mutate: impl FnOnce(&mut Profile)) {
-        let signal = self.profiles.read().get(&profile_name).copied();
+    pub fn write(&self, profile_name: &String, mutate: impl FnOnce(&mut Profile)) {
+        let signal = self.profiles.read().get(profile_name).copied();
         if let Some(mut signal) = signal {
             mutate(&mut signal.write());
             // save here

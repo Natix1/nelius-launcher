@@ -226,7 +226,9 @@ pub fn ProfileAdd(open: Signal<bool>) -> Element {
                                     let profile = Profile {
                                         profile_name: profile_name().to_owned(),
                                         version_id: version_id().to_owned(),
-                                        java_binary_path: java_binary_path().to_owned()
+                                        java_binary_path: java_binary_path().to_owned(),
+
+                                        ..Default::default()
                                     };
 
                                     let _ = profile_store.add(profile);
