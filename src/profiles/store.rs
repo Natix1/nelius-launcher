@@ -20,6 +20,7 @@ impl Default for ProfileStore {
     }
 }
 
+#[allow(dead_code)]
 impl ProfileStore {
     pub fn load() -> Self {
         let config_path = &directories::get_directories().config_file;
@@ -59,7 +60,6 @@ impl ProfileStore {
         let signal = self.profiles.read().get(profile_name).copied();
         if let Some(mut signal) = signal {
             mutate(&mut signal.write());
-            // save here
         }
     }
 
@@ -74,13 +74,13 @@ impl ProfileStore {
 
     pub fn remove(&mut self, profile_name: String) -> anyhow::Result<()> {
         let selected = self.selected_profile_name.peek().to_owned();
-        if let Some(selected) = selected {
-            if selected == profile_name {
-                self.selected_profile_name.set(None);
-            }
+        if let Some(selected) = selected
+            && selected == profile_name
+        {
+            self.selected_profile_name.set(None);
         }
 
-        if let Some(_) = self.profiles.write().remove(&profile_name) {
+        if self.profiles.write().remove(&profile_name).is_some() {
             Ok(())
         } else {
             bail!("This profile did not exist.")

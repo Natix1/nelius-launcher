@@ -19,7 +19,7 @@ fn validate_profile_name(name: String, profiles: &ProfileStore) -> bool {
         return false;
     }
 
-    return true;
+    true
 }
 
 #[component]
@@ -101,7 +101,7 @@ fn ProfileGameVersionDropdown(version_id: Signal<String>) -> Element {
             match &*versions.read() {
                 Some(Ok(list)) => {
                     rsx! {
-                        ProfileGameVersionDropdownOption { value: "No version selected", disabled: { version_id() != "" } }
+                        ProfileGameVersionDropdownOption { value: "No version selected", disabled: { !version_id().is_empty() } }
 
                         for v in list {
                             ProfileGameVersionDropdownOption { value: v.version_id.clone() }
@@ -136,7 +136,7 @@ pub fn JavaBinarySelector(java_binary_path: Signal<String>) -> Element {
                     }
                 },
                 {
-                    if java_binary_path() == "" {
+                    if java_binary_path().is_empty() {
                         rsx! {
                             p {
                                 "Select java binary"
@@ -158,7 +158,7 @@ pub fn JavaBinarySelector(java_binary_path: Signal<String>) -> Element {
 #[component]
 pub fn ProfileAdd(open: Signal<bool>) -> Element {
     let mut profile_store = use_context::<ProfileStore>();
-    let profile_name = use_signal(|| String::new());
+    let profile_name = use_signal(String::new);
     let version_id = use_signal(|| String::from(""));
     let java_binary_path = use_signal(|| String::from(""));
 
@@ -167,15 +167,15 @@ pub fn ProfileAdd(open: Signal<bool>) -> Element {
             return false;
         }
 
-        if version_id() == "" {
+        if version_id().is_empty() {
             return false;
         }
 
-        if java_binary_path() == "" {
+        if java_binary_path().is_empty() {
             return false;
         }
 
-        return true;
+        true
     });
 
     if !open() {

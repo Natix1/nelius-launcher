@@ -8,7 +8,7 @@ use crate::{
 #[component]
 pub fn ProfileDetailsPane() -> Element {
     let profile_store = use_context::<ProfileStore>();
-    if (&*profile_store.selected_profile_name.read()).is_some() {
+    if (*profile_store.selected_profile_name.read()).is_some() {
         rsx! {
             div {
                 class: "w-5/6 flex flex-col bg-white/5 rounded-xl h-full p-4 gap-3 ring-1 ring-white/15",

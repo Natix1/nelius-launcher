@@ -157,9 +157,9 @@ struct ToDownload {
 
 pub async fn install_minecraft(
     version: &VersionData,
-    profile_directory: &PathBuf,
+    profile_directory: &Path,
 ) -> anyhow::Result<ProfileInstallationData, anyhow::Error> {
-    fs::create_dir_all(profile_directory.as_path()).await?;
+    fs::create_dir_all(profile_directory).await?;
 
     let mut classpath_relative: Vec<String> = Vec::with_capacity(256);
     let directories = directories::get_directories();

@@ -1,7 +1,8 @@
-use std::{fs, path::PathBuf, sync::LazyLock};
+use std::{path::PathBuf, sync::LazyLock};
 
 use directories::ProjectDirs;
 
+#[allow(dead_code)]
 pub struct Directories {
     pub config: PathBuf,
     pub data: PathBuf,

@@ -10,7 +10,7 @@ pub enum NeliusButtonStyle {
 }
 
 impl NeliusButtonStyle {
-    pub fn to_tailwind(&self) -> &'static str {
+    pub fn make_tailwind_class(&self) -> &'static str {
         match self {
             Self::Safe => "bg-emerald-600 hover:bg-emerald-500 cursor-pointer",
             Self::Danger => "bg-rose-600 hover:bg-rose-500 cursor-pointer",
@@ -32,7 +32,7 @@ pub fn NeliusButton(
 
     rsx! {
         button {
-            class: format!("h-full rounded-lg {}", real_style().to_tailwind()),
+            class: format!("h-full rounded-lg {}", real_style().make_tailwind_class()),
             onclick: move |e| {
                 onclick.call(e)
             },

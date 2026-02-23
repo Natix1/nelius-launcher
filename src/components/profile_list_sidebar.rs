@@ -25,7 +25,7 @@ pub fn ProfileListSidebar(onaddbuttonpressed: EventHandler<()>) -> Element {
             ul {
                 class: "flex flex-col gap-2 w-full items-center",
                 {
-                    profiles.iter().map(|(_, profile)| {
+                    profiles.values().map(|profile| {
                         rsx! {
                             ProfileListItem {
                                 profile_name: profile.read().profile_name.clone()

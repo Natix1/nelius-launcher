@@ -67,17 +67,11 @@ pub fn ProfileManagementBox() -> Element {
                         }
 
                         let selected = &*profile_store.selected_profile_name.read();
-                        match selected {
-                            Some(profile) => {
-                                let profile = profile_store.peek(profile);
-                                match profile {
-                                    Some(signal) => {
-                                        signal.peek().kill_notify.notify_one();
-                                    },
-                                    None => {}
-                                }
-                            },
-                            None => {}
+                        if let Some(profile) = selected {
+                            let profile = profile_store.peek(profile);
+                            if let Some(signal) = profile {
+                                signal.peek().kill_notify.notify_one();
+                            }
                         }
                     },
                     disabled: !game_running()

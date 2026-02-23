@@ -1,7 +1,6 @@
 use std::{path::PathBuf, process::Stdio, sync::Arc};
 
 use anyhow::Context;
-use dioxus::core::Runtime;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
@@ -35,9 +34,7 @@ pub struct Profile {
 impl Profile {
     pub fn get_profile_directory(&self) -> PathBuf {
         let profiles_directory = launcher::directories::get_directories().profiles.to_owned();
-        let profile_directory = profiles_directory.join(&self.profile_name);
-
-        return profile_directory;
+        profiles_directory.join(&self.profile_name)
     }
 
     pub async fn get_installation_data_or_install(&self) -> anyhow::Result<ProfileInstallationData> {
@@ -74,7 +71,7 @@ impl Profile {
         let seperator = if std::env::consts::OS == "windows" { ";" } else { ":" };
         let classpath = classpath_entries.join(seperator);
 
-        cmd.current_dir(&self.get_profile_directory())
+        cmd.current_dir(self.get_profile_directory())
             .arg(format!("-Djava.library.path={}", directories.natives.display()))
             .arg("-Xmx4G")
             .arg("-cp")
@@ -85,7 +82,7 @@ impl Profile {
             .arg("--version")
             .arg(&self.version_id)
             .arg("--gameDir")
-            .arg(&self.get_profile_directory())
+            .arg(self.get_profile_directory())
             .arg("-assetsDir")
             .arg(&directories.assets)
             .arg("--assetIndex")
@@ -97,7 +94,7 @@ impl Profile {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        return cmd;
+        cmd
     }
 
     // This future does not resolve until the game process exits.

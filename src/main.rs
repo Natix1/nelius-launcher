@@ -49,7 +49,7 @@ fn App() -> Element {
         let mut flat_profiles = HashMap::new();
 
         for (name, profile) in &*profiles {
-            flat_profiles.insert(name.to_owned(), (&*profile.read()).to_owned());
+            flat_profiles.insert(name.to_owned(), (*profile.read()).to_owned());
         }
 
         spawn(async move {
