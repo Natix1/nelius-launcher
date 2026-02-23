@@ -10,7 +10,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-22.04, windows-latest, macos-latest]
 
     permissions:
       contents: write
@@ -24,14 +24,24 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Build
-        run: cargo build --release
+      - name: "Install dioxus-cli"
+        run: cargo install dioxus-cli
+
+      - name: Bundle
+        id: dioxus_bundle
+        shell: bash
+        run: |
+          RAW_PATHS=$(dx bundle --desktop --json-output --verbose | tail -1 | jq -r '.json | fromjson | .BundleOutput.bundles []')
+          echo "Discovered files:"
+          echo "$RAW_PATHS"
+
+          echo "PATHS_TO_RELEASE<<EOF" >> $GITHUB_OUTPUT
+          echo "$RAW_PATHS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            target/release/nelius-launcher
-            target/release/nelius-launcher.exe
+          files: ${{ steps.dioxus_bundle.outputs.PATHS_TO_RELEASE }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
