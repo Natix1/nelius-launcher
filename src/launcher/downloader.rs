@@ -165,7 +165,7 @@ pub async fn install_minecraft(
     let directories = directories::get_directories();
 
     let client_jar_directory =
-        directories.versions.join("versions").join(&version.version_id).join(format!("{}.jar", &version.version_id));
+        directories.versions.join(&version.version_id).join(format!("{}.jar", &version.version_id));
     let asset_index_path = directories.indexes.join(format!("{}.json", &version.asset_index_id));
 
     fs::create_dir_all(&directories.libraries).await?;
