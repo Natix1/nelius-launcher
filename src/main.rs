@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use dioxus::prelude::*;
+use dioxus::{desktop::LogicalSize, prelude::*};
 
 use crate::{
     components::{
@@ -26,8 +26,7 @@ fn main() {
         .with_window(
             dioxus::desktop::WindowBuilder::new()
                 .with_title("Nelius launcher")
-                .with_decorations(true)
-                .with_transparent(true),
+                .with_min_inner_size(LogicalSize::new(800.0, 600.0)),
         )
         .with_menu(None);
 
