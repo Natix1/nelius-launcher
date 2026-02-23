@@ -1,0 +1,29 @@
+[application]
+name = "Nelius Launcher"
+default_platform = "desktop"
+asset_dir = "assets"
+
+[web.app]
+
+# HTML title tag content
+title = "Nelius Launcher"
+
+# include `assets` in web platform
+[web.resource]
+
+# Additional CSS style files
+style = ["main.css"]
+
+# Additional JavaScript files
+script = []
+
+[web.resource.dev]
+
+# Javascript code file
+# serve: [dev-server] only
+script = []
+
+[bundle]
+identifier = "org.nelius-launcher"
+publisher = "Nelius Launcher"
+icon = ["assets/nelius.png"]
