@@ -83,16 +83,16 @@ impl ProfileStore {
         }
     }
 
-    pub async fn remove(&mut self, profile_name: String) -> anyhow::Result<()> {
+    pub async fn remove(&mut self, profile_name: &String) -> anyhow::Result<()> {
         let selected = self.selected_profile_name.peek().to_owned();
 
         if let Some(selected) = selected
-            && selected == profile_name
+            && &selected == profile_name
         {
             self.selected_profile_name.set(None);
         }
 
-        let profile = self.profiles.write().remove(&profile_name);
+        let profile = self.profiles.write().remove(profile_name);
         match profile {
             Some(profile) => {
                 let profile_data = profile.peek().clone();
