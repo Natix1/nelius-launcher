@@ -30,7 +30,7 @@ pub fn ProfileDetailsPane() -> Element {
             div {
                 class: "w-full h-full flex justify-center items-center p-10",
                 p {
-                    class: "text-6xl w-full text-center",
+                    class: "text-3xl w-full text-center",
                     "Select a profile from your left to get started!"
                 }
             }
