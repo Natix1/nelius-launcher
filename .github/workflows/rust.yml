@@ -31,10 +31,9 @@ jobs:
         id: dioxus_bundle
         shell: bash
         run: |
-          RAW_PATHS=$(dx bundle --desktop --json-output --verbose | tail -1 | jq -r '.json | fromjson | .BundleOutput.bundles []')
-          echo "Discovered files:"
-          echo "$RAW_PATHS"
-
+          set -o pipefail
+          dx bundle --desktop --json-output --verbose | tee output.log
+          RAW_PATHS=$(tail -1 output.log | jq -r '.json | fromjson | .BundleOutput.bundles []')
           echo "PATHS_TO_RELEASE<<EOF" >> $GITHUB_OUTPUT
           echo "$RAW_PATHS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
