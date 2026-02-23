@@ -26,4 +26,4 @@ script = []
 [bundle]
 identifier = "org.nelius-launcher"
 publisher = "Nelius Launcher"
-icon = ["assets/nelius.png"]
+icon = ["icon/icon.png"]
