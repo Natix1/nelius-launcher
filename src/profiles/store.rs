@@ -67,23 +67,40 @@ impl ProfileStore {
         self.profiles.read().contains_key(profile_name)
     }
 
+    pub fn read(&self, profile_name: &String) -> Option<Signal<Profile>> {
+        self.profiles.get(profile_name).as_ref().map(|profile| **profile)
+    }
+
     pub fn add(&mut self, profile: Profile) -> anyhow::Result<()> {
         self.profiles.write().insert(profile.profile_name.clone(), Signal::new_in_scope(profile, ScopeId::ROOT));
         Ok(())
     }
 
-    pub fn remove(&mut self, profile_name: String) -> anyhow::Result<()> {
+    pub fn read_selected(&self) -> Option<Signal<Profile>> {
+        match &*self.selected_profile_name.read() {
+            Some(selected) => self.read(selected),
+            None => None,
+        }
+    }
+
+    pub async fn remove(&mut self, profile_name: String) -> anyhow::Result<()> {
         let selected = self.selected_profile_name.peek().to_owned();
+
         if let Some(selected) = selected
             && selected == profile_name
         {
             self.selected_profile_name.set(None);
         }
 
-        if self.profiles.write().remove(&profile_name).is_some() {
-            Ok(())
-        } else {
-            bail!("This profile did not exist.")
+        let profile = self.profiles.write().remove(&profile_name);
+        match profile {
+            Some(profile) => {
+                let profile_data = profile.peek().clone();
+                profile_data.uninstall().await?;
+            }
+            None => bail!("Profile with this name did not exist"),
         }
+
+        Ok(())
     }
 }

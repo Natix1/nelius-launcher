@@ -153,6 +153,9 @@ impl Profile {
     }
 
     pub async fn uninstall(&self) -> anyhow::Result<()> {
-        todo!()
+        let profile_dir = self.get_profile_directory();
+        fs::remove_dir_all(&profile_dir).await?;
+
+        Ok(())
     }
 }

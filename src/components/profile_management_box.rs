@@ -30,22 +30,19 @@ pub fn ProfileManagementBox() -> Element {
 
                         game_running.set(true);
 
-                        if let Some(selected_profile) = &*profile_store.selected_profile_name.read() {
-                            let profile = profile_store.peek(selected_profile);
-                            if let Some(profile) = profile {
-                                let mut profile = profile.read().cloned();
-                                spawn(async move {
-                                   match profile.launch_or_install().await {
-                                       Ok(_) => {},
-                                       Err(e) => {
-                                           eprintln!("{e}");
-                                           return;
-                                       }
+                        if let Some(profile) = profile_store.read_selected() {
+                            let mut profile = profile.read().cloned();
+                            spawn(async move {
+                               match profile.launch_or_install().await {
+                                   Ok(_) => {},
+                                   Err(e) => {
+                                       eprintln!("{e}");
+                                       return;
                                    }
+                               }
 
-                                   game_running.set(false);
-                                });
-                            }
+                               game_running.set(false);
+                            });
                         }
                     },
                     disabled: game_running()
@@ -54,7 +51,9 @@ pub fn ProfileManagementBox() -> Element {
                     text: "Uninstall",
                     style: NeliusButtonStyle::Danger,
                     icon: UNINSTALL_ASSET,
-                    onclick: move |_| {},
+                    onclick: move |_| {
+
+                    },
                     disabled: game_running()
                 }
                 NeliusButton {
@@ -66,12 +65,8 @@ pub fn ProfileManagementBox() -> Element {
                             return
                         }
 
-                        let selected = &*profile_store.selected_profile_name.read();
-                        if let Some(profile) = selected {
-                            let profile = profile_store.peek(profile);
-                            if let Some(signal) = profile {
-                                signal.peek().kill_notify.notify_one();
-                            }
+                        if let Some(profile) = profile_store.read_selected() {
+                            profile.peek().kill_notify.notify_one();
                         }
                     },
                     disabled: !game_running()
