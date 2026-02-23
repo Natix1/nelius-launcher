@@ -1,4 +1,7 @@
 [application]
+name = "Nelius Launcher"
+default_platform = "desktop"
+asset_dir = "assets"
 
 [web.app]
 
@@ -22,5 +25,5 @@ script = []
 
 [bundle]
 identifier = "org.nelius-launcher"
-publisher = "Nelius launcher"
+publisher = "Nelius Launcher"
 icon = ["assets/nelius.png"]
